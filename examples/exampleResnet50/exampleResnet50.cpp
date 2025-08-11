@@ -66,6 +66,7 @@ class Resnet50
 public:
     Resnet50(const std::string &engineFilename);
     bool infer(const std::string &input_filename, int32_t width, int32_t height, const std::string &output_filename);
+    bool init(void);
 
 private:
     std::string mEngineFilename; //!< Filename of the serialized engine.
@@ -75,7 +76,57 @@ private:
 
     std::unique_ptr<nvinfer1::IRuntime> mRuntime;   //!< The TensorRT runtime used to run the network
     std::unique_ptr<nvinfer1::ICudaEngine> mEngine; //!< The TensorRT engine used to run the network
+
+    std::unique_ptr<nvinfer1::IExecutionContext> mContext; //!< The TensorRT execution mContext
+
+    char const *getNodeName(nvinfer1::TensorIOMode nodeType);
+    size_t dataMemSize(nvinfer1::DataType dataType);
 };
+
+size_t Resnet50::dataMemSize(nvinfer1::DataType dataType)
+{
+    switch (dataType)
+    {
+    case nvinfer1::DataType::kFLOAT:
+        return 4UL; // 32-bit float
+    case nvinfer1::DataType::kHALF:
+        return 2UL; // 16-bit float
+    case nvinfer1::DataType::kINT8:
+        return 1UL; // 8-bit int
+    case nvinfer1::DataType::kINT32:
+        return 4UL; // 32-bit int
+    case nvinfer1::DataType::kBOOL:
+        return 1UL; // 8-bit bool
+    case nvinfer1::DataType::kUINT8:
+        return 1UL; // 8-bit unsigned int
+    case nvinfer1::DataType::kFP8:
+        return 1UL; // 8-bit float
+    case nvinfer1::DataType::kBF16:
+        return 2UL; // 16-bit brain float
+    case nvinfer1::DataType::kINT64:
+        return 8UL; // 64-bit int
+    case nvinfer1::DataType::kINT4:
+        return 0UL; // 4-bit int (packed)
+    default:
+        return 0UL;
+    }
+}
+
+char const *Resnet50::getNodeName(nvinfer1::TensorIOMode nodeType)
+{
+    char const *input_name = nullptr;
+
+    for (int i = 0; i < mEngine->getNbIOTensors(); ++i)
+    {
+        const char *name = mEngine->getIOTensorName(i);
+
+        if (mEngine->getTensorIOMode(name) == nodeType)
+        {
+            input_name = name;
+            break;
+        }
+    }
+}
 
 Resnet50::Resnet50(const std::string &engineFilename)
     : mEngineFilename(engineFilename), mEngine(nullptr)
@@ -107,28 +158,39 @@ Resnet50::Resnet50(const std::string &engineFilename)
 }
 
 //!
+//! \brief Initialize the TensorRT inference.
+//!
+//! \details Allocate input and output memory.
+//!
+bool Resnet50::init(void)
+{
+}
+
+//!
 //! \brief Runs the TensorRT inference.
 //!
 //! \details Allocate input and output memory, and executes the engine.
 //!
 bool Resnet50::infer(const std::string &input_filename, int32_t width, int32_t height, const std::string &output_filename)
 {
-    auto context = std::unique_ptr<nvinfer1::IExecutionContext>(mEngine->createExecutionContext());
-    if (!context)
+    auto mContext = std::unique_ptr<nvinfer1::IExecutionContext>(mEngine->createExecutionContext());
+    if (!mContext)
     {
         return false;
     }
 
-    char const *input_name = "gpu_0/data_0";
+    char const *input_name = getNodeName(nvinfer1::TensorIOMode::kINPUT);
+    size_t inputDataSize = dataMemSize(mEngine->getTensorDataType(input_name));
     assert(mEngine->getTensorDataType(input_name) == nvinfer1::DataType::kFLOAT);
-    auto input_dims = nvinfer1::Dims4{/* batch size */ 1, /* channels */ 3, height, width};
-    context->setInputShape(input_name, input_dims);
-    auto input_size = util::getMemorySize(input_dims, sizeof(float));
+    nvinfer1::Dims input_dims = nvinfer1::Dims4{/* batch size */ 1, /* channels */ 3, height, width};
+    mContext->setInputShape(input_name, input_dims);
+    size_t input_size = (input_dims.d[0] * input_dims.d[1] * input_dims.d[2] * input_dims.d[3] * inputDataSize);
 
-    char const *output_name = "gpu_0/softmax_1";
+    char const *output_name = getNodeName(nvinfer1::TensorIOMode::kOUTPUT);
+    size_t outputDataSize = dataMemSize(mEngine->getTensorDataType(output_name));
     assert(mEngine->getTensorDataType(output_name) == nvinfer1::DataType::kFLOAT);
-    auto output_dims = context->getTensorShape(output_name);
-    auto output_size = util::getMemorySize(output_dims, sizeof(float));
+    nvinfer1::Dims output_dims = mContext->getTensorShape(output_name);
+    size_t output_size = util::getMemorySize(output_dims, outputDataSize);
 
     // Allocate CUDA memory for input and output bindings
     void *input_mem{nullptr};
@@ -163,11 +225,11 @@ bool Resnet50::infer(const std::string &input_filename, int32_t width, int32_t h
         gLogError << "ERROR: CUDA memory copy of input failed, size = " << input_size << " bytes" << std::endl;
         return false;
     }
-    context->setTensorAddress(input_name, input_mem);
-    context->setTensorAddress(output_name, output_mem);
+    mContext->setTensorAddress(input_name, input_mem);
+    mContext->setTensorAddress(output_name, output_mem);
 
     // Run TensorRT inference
-    bool status = context->enqueueV3(stream);
+    bool status = mContext->enqueueV3(stream);
     if (!status)
     {
         gLogError << "ERROR: TensorRT inference failed" << std::endl;
@@ -261,7 +323,7 @@ int main(int argc, char **argv)
     std::string prepped_img = "../exampleResnet50/squirrel-out.ppm";
 
     preprocess_to_ppm(
-        "../exampleResnet50/squirrel-1.jpg",
+        "../exampleResnet50/elephant.jpg",
         prepped_img,
         width,
         height);
