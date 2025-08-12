@@ -62,13 +62,27 @@ using sample::gLogInfo;
 //!
 class TensorInfer
 {
-
 public:
+    struct Config
+    {
+        int32_t batchSize = 1;
+        int32_t numChannels = 3;
+        int32_t height = 224;
+        int32_t width = 224;
+        std::string precision = "fp32";
+        std::string inputTensorName;                // Optional override
+        std::string outputTensorName;               // Optional override
+        std::vector<std::string> outputTensorNames; // If model has multiple outputs (e.g. YOLO: boxes, scores, classes)
+    };
+
     TensorInfer(const std::string &engineFilename);
-    bool infer(const std::string &input_filename, const std::string &output_filename);
+    ~TensorInfer();
+    std::unique_ptr<float> infer(const std::unique_ptr<float> &input);
     bool init(void);
 
 private:
+    Config mConfig;
+
     std::string mEngineFilename; //!< Filename of the serialized engine.
 
     nvinfer1::Dims mInputDims;  //!< The dimensions of the input to the network.
@@ -78,6 +92,8 @@ private:
     std::unique_ptr<nvinfer1::ICudaEngine> mEngine; //!< The TensorRT engine used to run the network
 
     std::unique_ptr<nvinfer1::IExecutionContext> mContext; //!< The TensorRT execution mContext
+
+    cudaStream_t mStream = nullptr;
 
     char const *mInputName;
     char const *mOutputName;
@@ -89,6 +105,12 @@ private:
     int32_t mNumChannels = 3;
     int32_t mHeight = 224;
     int32_t mWidtch = 224;
+
+    // TODO make static? or just instantiate class at global scope?
+    // Should persist for duration of program
+    // Clean up in destructor?
+    void *mInputMem = nullptr;
+    void *mOutputMem = nullptr;
 
     char const *getNodeName(nvinfer1::TensorIOMode nodeType);
     size_t dataMemSize(nvinfer1::DataType dataType);
@@ -144,7 +166,7 @@ char const *TensorInfer::getNodeName(nvinfer1::TensorIOMode nodeType)
 TensorInfer::TensorInfer(const std::string &engineFilename)
     : mEngineFilename(engineFilename), mEngine(nullptr)
 {
-    auto enginePath = path_relative_to_exe(engineFilename);
+    std::filesystem::path enginePath = path_relative_to_exe(engineFilename);
 
     gLogInfo << "[Engine] Resolved path = " << enginePath << std::endl;
     gLogInfo << "[Engine] Exists? "
@@ -188,6 +210,29 @@ TensorInfer::TensorInfer(const std::string &engineFilename)
     assert(mEngine->getTensorDataType(mOutputName) == nvinfer1::DataType::kFLOAT);
     mOutputDims = mContext->getTensorShape(mOutputName);
     mOutputSize = util::getMemorySize(mOutputDims, outputDataSize);
+
+    // Allocate CUDA memory for input and output bindings
+    if (cudaMalloc(&mInputMem, mInputSize) != cudaSuccess)
+    {
+        gLogError << "ERROR: input cuda memory allocation failed, size = " << mInputSize << " bytes" << std::endl;
+        return;
+    }
+
+    if (cudaMalloc(&mOutputMem, mOutputSize) != cudaSuccess)
+    {
+        gLogError << "ERROR: output cuda memory allocation failed, size = " << mOutputSize << " bytes" << std::endl;
+        return;
+    }
+
+    if (cudaStreamCreate(&mStream) != cudaSuccess)
+    {
+        gLogError << "ERROR: cuda mStream creation failed." << std::endl;
+        return;
+    }
+}
+
+TensorInfer::~TensorInfer()
+{
 }
 
 //!
@@ -197,6 +242,8 @@ TensorInfer::TensorInfer(const std::string &engineFilename)
 //!
 bool TensorInfer::init(void)
 {
+
+    return false;
 }
 
 //!
@@ -204,83 +251,38 @@ bool TensorInfer::init(void)
 //!
 //! \details Allocate input and output memory, and executes the engine.
 //!
-bool TensorInfer::infer(const std::string &input_filename, const std::string &output_filename)
+std::unique_ptr<float> TensorInfer::infer(const std::unique_ptr<float> &input)
 {
-    // Allocate CUDA memory for input and output bindings
-    void *input_mem{nullptr};
-    if (cudaMalloc(&input_mem, mInputSize) != cudaSuccess)
-    {
-        gLogError << "ERROR: input cuda memory allocation failed, size = " << mInputSize << " bytes" << std::endl;
-        return false;
-    }
-    void *output_mem{nullptr};
-    if (cudaMalloc(&output_mem, mOutputSize) != cudaSuccess)
-    {
-        gLogError << "ERROR: output cuda memory allocation failed, size = " << mOutputSize << " bytes" << std::endl;
-        return false;
-    }
-
-    // Read image data from file and mean-normalize it
-    const std::vector<float> mean{0.485f, 0.456f, 0.406f};
-    const std::vector<float> stddev{0.229f, 0.224f, 0.225f};
-    auto input_image{util::RGBImageReader(input_filename, mInputDims, mean, stddev)};
-    input_image.read();
-    auto input_buffer = input_image.process();
-    cudaStream_t stream;
-    if (cudaStreamCreate(&stream) != cudaSuccess)
-    {
-        gLogError << "ERROR: cuda stream creation failed." << std::endl;
-        return false;
-    }
-
     // Copy image data to input binding memory
-    if (cudaMemcpyAsync(input_mem, input_buffer.get(), mInputSize, cudaMemcpyHostToDevice, stream) != cudaSuccess)
+    if (cudaMemcpyAsync(mInputMem, input.get(), mInputSize, cudaMemcpyHostToDevice, mStream) != cudaSuccess)
     {
         gLogError << "ERROR: CUDA memory copy of input failed, size = " << mInputSize << " bytes" << std::endl;
-        return false;
+        // return;
     }
-    mContext->setTensorAddress(mInputName, input_mem);
-    mContext->setTensorAddress(mOutputName, output_mem);
+    mContext->setTensorAddress(mInputName, mInputMem);
+    mContext->setTensorAddress(mOutputName, mOutputMem);
 
     // Run TensorRT inference
-    bool status = mContext->enqueueV3(stream);
+    bool status = mContext->enqueueV3(mStream);
     if (!status)
     {
         gLogError << "ERROR: TensorRT inference failed" << std::endl;
-        return false;
+        // return;
     }
 
     // Copy predictions from output binding memory
-    auto output_buffer = std::unique_ptr<float>{new float[mOutputSize]};
-    if (cudaMemcpyAsync(output_buffer.get(), output_mem, mOutputSize, cudaMemcpyDeviceToHost, stream) != cudaSuccess)
+    std::unique_ptr<float> output = std::unique_ptr<float>{new float[mOutputSize]};
+    if (cudaMemcpyAsync(output.get(), mOutputMem, mOutputSize, cudaMemcpyDeviceToHost, mStream) != cudaSuccess)
     {
         gLogError << "ERROR: CUDA memory copy of output failed, size = " << mOutputSize << " bytes" << std::endl;
-        return false;
+        // return;
     }
-    cudaStreamSynchronize(stream);
-
-    // ---- Top-K on FP32 scores from `output_buffer` ----
-    float *scores = output_buffer.get(); // raw pointer for lambda
-
-    std::vector<size_t> idx(mOutputSize);
-    std::iota(idx.begin(), idx.end(), size_t{0});
-
-    size_t topk = std::min<size_t>(5, mOutputSize);
-    std::partial_sort(idx.begin(), idx.begin() + topk, idx.end(),
-                      [scores](size_t a, size_t b)
-                      { return scores[a] > scores[b]; });
-
-    for (size_t i = 0; i < topk; ++i)
-    {
-        size_t k = idx[i];
-        std::cout << "#" << (i + 1) << ": class " << k
-                  << " score " << scores[k] << "\n";
-    }
+    cudaStreamSynchronize(mStream);
 
     // Free CUDA resources
-    cudaFree(input_mem);
-    cudaFree(output_mem);
-    return true;
+    // cudaFree(mInputMem);
+    // cudaFree(mOutputMem);
+    return output;
 }
 
 // Resize shortest side to 256 (keep aspect), center-crop to HxW, convert to RGB,
@@ -327,10 +329,42 @@ inline void preprocess_to_ppm(const std::string &in_path,
     }
 }
 
+inline std::unique_ptr<float> process_input(const std::string &input_filename, nvinfer1::Dims dims)
+{
+    // Read image data from file and mean-normalize it
+    const std::vector<float> mean{0.485f, 0.456f, 0.406f};
+    const std::vector<float> stddev{0.229f, 0.224f, 0.225f};
+    auto input_image{util::RGBImageReader(input_filename, dims, mean, stddev)};
+    input_image.read();
+    return input_image.process();
+}
+
+void process_output(std::unique_ptr<float> output)
+{
+    // ---- Top-K on FP32 scores from `output_buffer` ----
+    float *scores = output.get(); // raw pointer for lambda
+    int32_t mOutputSize = 1 * 3 * 224 * 224;
+
+    std::vector<size_t> idx(mOutputSize);
+    std::iota(idx.begin(), idx.end(), size_t{0});
+    size_t topk = std::min<size_t>(5, mOutputSize);
+    std::partial_sort(idx.begin(), idx.begin() + topk, idx.end(),
+                      [scores](size_t a, size_t b)
+                      { return scores[a] > scores[b]; });
+
+    for (size_t i = 0; i < topk; ++i)
+    {
+        size_t k = idx[i];
+        std::cout << "#" << (i + 1) << ": class " << k
+                  << " score " << scores[k] << "\n";
+    }
+}
+
 int main(int argc, char **argv)
 {
     int32_t width{224};
     int32_t height{224};
+    nvinfer1::Dims input_dims = nvinfer1::Dims4{1, 3, 224, 224};
 
     TensorInfer sample("../../exampleResnet50/resnet_engine_intro.engine");
 
@@ -342,13 +376,13 @@ int main(int argc, char **argv)
         width,
         height);
 
+    std::unique_ptr<float> input = process_input(prepped_img, input_dims);
+
     gLogInfo
         << "Running TensorRT inference for ResNet50" << std::endl;
 
-    if (!sample.infer(prepped_img, "../exampleResnet50/output.ppm"))
-    {
-        return -1;
-    }
+    std::unique_ptr<float> output = sample.infer(input);
+    process_output(std::move(output));
 
     return 0;
 }
