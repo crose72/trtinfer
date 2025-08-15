@@ -16,5 +16,5 @@ target_link_libraries(exampleResnet50
     ${OpenCV_LIBS}
     cudart
     nvinfer
-    common_utils
+    tensorrtinfer
     )

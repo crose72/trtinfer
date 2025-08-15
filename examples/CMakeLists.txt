@@ -13,6 +13,4 @@ find_package(OpenCV REQUIRED)
 find_package(TensorRT REQUIRED)
 
 # Add subdirectories for each example
-add_subdirectory(common)
 add_subdirectory(exampleResnet50)
-# add_subdirectory(otherExample)
