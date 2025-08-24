@@ -1,4 +1,3 @@
-/*
 #include "yolov8.h"
 #include <opencv2/cudaimgproc.hpp>
 
@@ -19,13 +18,14 @@ YoloV8::YoloV8(const std::string &onnxModelPath, const std::string &trtModelPath
             throw std::runtime_error("Error: Must supply calibration data path for INT8 calibration");
         }
     }
-
+    /*
     // Create our TensorRT inference engine
-    m_trtEngine = std::make_unique<Engine<float>>(options);
+    m_trtEngine = std::make_unique<Engine<float>>();
 
     // Build the onnx model into a TensorRT engine file, cache the file to disk, and then load the TensorRT engine file into memory.
     // If the engine file already exists on disk, this function will not rebuild but only load into memory.
     // The engine file is rebuilt any time the above Options are changed.
+    // TODO: use the new engine class
     if (!onnxModelPath.empty()) {
         // Build the ONNX model into a TensorRT engine file
         auto succ = m_trtEngine->buildLoadNetwork(onnxModelPath, SUB_VALS, DIV_VALS, NORMALIZE);
@@ -43,6 +43,7 @@ YoloV8::YoloV8(const std::string &onnxModelPath, const std::string &trtModelPath
     } else {
         throw std::runtime_error("Error: Neither ONNX model nor TensorRT engine path provided.");
     }
+    */
 }
 
 std::vector<std::vector<cv::cuda::GpuMat>> YoloV8::preprocess(const cv::cuda::GpuMat &gpuImg) {
@@ -58,7 +59,7 @@ std::vector<std::vector<cv::cuda::GpuMat>> YoloV8::preprocess(const cv::cuda::Gp
     // Resize to the model expected input size while maintaining the aspect ratio with the use of padding
     if (resized.rows != inputDims[0].d[1] || resized.cols != inputDims[0].d[2]) {
         // Only resize if not already the right size to avoid unecessary copy
-        resized = Engine<float>::resizeKeepAspectRatioPadRightBottom(rgbMat, inputDims[0].d[1], inputDims[0].d[2]);
+        resized = resizeKeepAspectRatioPadRightBottom(rgbMat, inputDims[0].d[1], inputDims[0].d[2]);
     }
 
     // Convert to format expected by our inference engine
@@ -92,7 +93,7 @@ std::vector<Object> YoloV8::detectObjects(const cv::cuda::GpuMat &inputImageBGR)
     preciseStopwatch s2;
 #endif
     std::vector<std::vector<std::vector<float>>> featureVectors;
-    auto succ = m_trtEngine->runInference(input, featureVectors);
+    auto succ = false;// m_trtEngine->runInference(input, featureVectors);
     if (!succ) {
         throw std::runtime_error("Error: Unable to run inference.");
     }
@@ -109,7 +110,7 @@ std::vector<Object> YoloV8::detectObjects(const cv::cuda::GpuMat &inputImageBGR)
         // Object detection or pose estimation
         // Since we have a batch size of 1 and only 1 output, we must convert the output from a 3D array to a 1D array.
         std::vector<float> featureVector;
-        Engine<float>::transformOutput(featureVectors, featureVector);
+        transformOutput(featureVectors, featureVector);
 
         const auto &outputDims = m_trtEngine->getOutputDims();
         int numChannels = outputDims[outputDims.size() - 1].d[1];
@@ -126,7 +127,7 @@ std::vector<Object> YoloV8::detectObjects(const cv::cuda::GpuMat &inputImageBGR)
         // Segmentation
         // Since we have a batch size of 1 and 2 outputs, we must convert the output from a 3D array to a 2D array.
         std::vector<std::vector<float>> featureVector;
-        Engine<float>::transformOutput(featureVectors, featureVector);
+        transformOutput(featureVectors, featureVector);
         ret = postProcessSegmentation(featureVector);
     }
 #ifdef ENABLE_BENCHMARKS
@@ -152,7 +153,7 @@ std::vector<Object> YoloV8::postProcessSegmentation(std::vector<std::vector<floa
     int numChannels = outputDims[0].d[1];
     int numAnchors = outputDims[0].d[2];
 
-    const auto numClasses = numChannels - SEG_CHANNELS - 4;
+    const auto numClasses = numChannels - -4;
 
     // Ensure the output lengths are correct
     if (featureVectors[0].size() != static_cast<size_t>(numChannels) * numAnchors) {
@@ -343,8 +344,21 @@ std::vector<Object> YoloV8::postprocessPose(std::vector<float> &featureVector) {
 
 std::vector<Object> YoloV8::postprocessDetect(std::vector<float> &featureVector) {
     const auto &outputDims = m_trtEngine->getOutputDims();
+    std::cout << "[OutputDims] Number of outputs: " << outputDims.size() << std::endl;
+
+    for (size_t i = 0; i < outputDims.size(); ++i) {
+        const auto &dims = outputDims[i];
+        std::cout << "[OutputDims][" << i << "] nbDims = " << dims.nbDims << " [";
+        for (int j = 0; j < dims.nbDims; ++j) {
+            std::cout << dims.d[j];
+            if (j < dims.nbDims - 1)
+                std::cout << ", ";
+        }
+        std::cout << "]" << std::endl;
+    }
     auto numChannels = outputDims[0].d[1];
     auto numAnchors = outputDims[0].d[2];
+    std::cout << "numChannels = " << numChannels << " numAnchors = " << numAnchors << std::endl;
 
     auto numClasses = CLASS_NAMES.size();
 
@@ -491,4 +505,3 @@ void YoloV8::drawObjectLabels(cv::Mat &image, const std::vector<Object> &objects
         }
     }
 }
-*/

@@ -14,6 +14,11 @@
 #include <fstream>
 #include "logging.h"
 
+cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(const cv::cuda::GpuMat &input, size_t height, size_t width,
+                                                        const cv::Scalar &bgcolor = cv::Scalar(0, 0, 0));
+void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output);
+void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<float> &output);                                                        
+
 // Precision used for GPU inference
 enum class Precision
 {
@@ -118,6 +123,7 @@ class Engine : public IEngine<T>
 {
 public:
     Engine(const std::string &engineFilename);
+    Engine();
     ~Engine();
     /*
     • Has input and output layers (tensor names & binding indices)
@@ -171,6 +177,10 @@ public:
 
 private:
     void getEngineInfo(void);
+    void transformOutput(std::vector<std::vector<std::vector<T>>> &input, std::vector<std::vector<T>> &output);
+    void transformOutput(std::vector<std::vector<std::vector<T>>> &input, std::vector<T> &output);
+
+
     // Build the network
     bool build(std::string onnxModelPath, const std::array<float, 3> &subVals, const std::array<float, 3> &divVals, bool normalize);
 

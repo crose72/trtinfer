@@ -92,6 +92,9 @@ Engine<T>::Engine(const std::string &engineFilename)
 }
 
 template <typename T>
+Engine<T>::Engine(void) {}
+
+template <typename T>
 Engine<T>::~Engine(void) {}
 
 template <typename T>
@@ -298,6 +301,35 @@ void Engine<T>::printEngineInfo() const
 
     std::cout << "=========================" << std::endl;
 }
+
+cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(const cv::cuda::GpuMat &input, size_t height, size_t width,
+                                                        const cv::Scalar &bgcolor) {
+    float r = std::min(width / (input.cols * 1.0), height / (input.rows * 1.0));
+    int unpad_w = r * input.cols;
+    int unpad_h = r * input.rows;
+    cv::cuda::GpuMat re(unpad_h, unpad_w, CV_8UC3);
+    cv::cuda::resize(input, re, re.size());
+    cv::cuda::GpuMat out(height, width, CV_8UC3, bgcolor);
+    re.copyTo(out(cv::Rect(0, 0, re.cols, re.rows)));
+    return out;
+}
+
+void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output) {
+    if (input.size() != 1) {
+        std::cerr << "The feature vector has incorrect dimensions!" << std::endl;
+    }
+
+    output = std::move(input[0]);
+}
+
+void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<float> &output) {
+    if (input.size() != 1 || input[0].size() != 1) {
+        std::cerr << "The feature vector has incorrect dimensions!" << std::endl;
+    }
+
+    output = std::move(input[0][0]);
+}
+
 
 // Add explicit template instantiations for Engine<float>
 template Engine<float>::Engine(const std::string &engineFilename);
