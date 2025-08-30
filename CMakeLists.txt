@@ -10,6 +10,7 @@ set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 find_package(CUDA REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(TensorRT REQUIRED)
+find_package(fmt REQUIRED)
 
 # Source files from src/
 file(GLOB TENSORRT_INFER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
@@ -28,6 +29,7 @@ target_link_libraries(tensorrtinfer
     ${OpenCV_LIBS}
     cudart
     nvinfer
+    fmt::fmt
     )
 
 # Build examples

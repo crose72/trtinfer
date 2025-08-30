@@ -18,8 +18,6 @@
 #include "logger.h"
 #include "logging.h"
 
-namespace sample
-{
 Logger gLogger{Logger::Severity::kINFO};
 LogStreamConsumer gLogVerbose{LOG_VERBOSE(gLogger)};
 LogStreamConsumer gLogInfo{LOG_INFO(gLogger)};
@@ -36,4 +34,3 @@ void setReportableSeverity(Logger::Severity severity)
     gLogError.setReportableSeverity(severity);
     gLogFatal.setReportableSeverity(severity);
 }
-} // namespace sample

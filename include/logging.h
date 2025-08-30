@@ -15,8 +15,8 @@
  * limitations under the License.
  */
 
-#ifndef TENSORRT_SAMPLE_COMMON_LOGGING_H
-#define TENSORRT_SAMPLE_COMMON_LOGGING_H
+#ifndef TENSORRT_COMMON_LOGGING_H
+#define TENSORRT_COMMON_LOGGING_H
 
 #include "NvInferRuntimeCommon.h"
 #include <cassert>
@@ -512,4 +512,4 @@ inline LogStreamConsumer LOG_FATAL(const Logger &logger)
     return LogStreamConsumer(logger.getReportableSeverity(), Severity::kINTERNAL_ERROR);
 }
 
-#endif // TENSORRT_SAMPLE_COMMON_LOGGING_H
+#endif // TENSORRT_COMMON_LOGGING_H

@@ -1,57 +1,7 @@
-#include "engine.h"
-
-std::string getDataTypeString(nvinfer1::DataType dataType)
-{
-    switch (dataType)
-    {
-    case nvinfer1::DataType::kFLOAT:
-        return "FP32";
-    case nvinfer1::DataType::kHALF:
-        return "FP16";
-    case nvinfer1::DataType::kINT8:
-        return "INT8";
-    case nvinfer1::DataType::kINT32:
-        return "INT32";
-    case nvinfer1::DataType::kBOOL:
-        return "BOOL";
-    default:
-        return "UNKNOWN";
-    }
-}
-
-std::string cnvrtTensorFormatToString(nvinfer1::TensorFormat format)
-{
-    switch (format)
-    {
-    case nvinfer1::TensorFormat::kLINEAR:
-        return "LINEAR";
-    case nvinfer1::TensorFormat::kCHW2:
-        return "CHW2";
-    case nvinfer1::TensorFormat::kHWC8:
-        return "HWC8";
-    case nvinfer1::TensorFormat::kCHW4:
-        return "CHW4";
-    case nvinfer1::TensorFormat::kCHW16:
-        return "CHW16";
-    case nvinfer1::TensorFormat::kCHW32:
-        return "CHW32";
-    default:
-        return "UNKNOWN";
-    }
-}
-
-// Define the global logger
-Logger gLogger{nvinfer1::ILogger::Severity::kINFO};
-
-std::filesystem::path path_relative_to_exe(const std::filesystem::path &rel)
-{
-    auto exe = std::filesystem::canonical("/proc/self/exe");
-    auto exe_dir = exe.parent_path(); // .../toplevel/build/exampleResnet50
-    return std::filesystem::weakly_canonical(exe_dir / rel);
-}
+#include "TRTEngine.h"
 
 template <typename T>
-Engine<T>::Engine(const std::string &engineFilename)
+TRTEngine<T>::TRTEngine(const std::string &engineFilename)
     : mEngineFilename(engineFilename),
       mEngine(nullptr)
 {
@@ -92,13 +42,13 @@ Engine<T>::Engine(const std::string &engineFilename)
 }
 
 template <typename T>
-Engine<T>::Engine(void) {}
+TRTEngine<T>::TRTEngine(void) {}
 
 template <typename T>
-Engine<T>::~Engine(void) {}
+TRTEngine<T>::~TRTEngine(void) {}
 
 template <typename T>
-void Engine<T>::getEngineInfo(void)
+void TRTEngine<T>::getEngineInfo(void)
 {
     int32_t numTensors = mEngine->getNbIOTensors();
 
@@ -195,7 +145,7 @@ void Engine<T>::getEngineInfo(void)
             // possible batch size (although we could actually end up using less
             // memory)
             // TODO - could keep as a max memory size limit? probably delete though
-            // Util::checkCudaErrorCode(cudaMallocAsync(&m_buffers[tensor], outputLength * m_options.maxBatchSize * sizeof(T), stream));
+            // checkCudaErrorCode(cudaMallocAsync(&mBuffers[tensor], outputLength * mOptions.maxBatchSize * sizeof(T), stream));
         }
         else
         {
@@ -205,7 +155,7 @@ void Engine<T>::getEngineInfo(void)
 }
 
 template <typename T>
-void Engine<T>::printEngineInfo() const
+void TRTEngine<T>::printEngineInfo() const
 {
     std::cout << "=== Engine Information ===" << std::endl;
 
@@ -302,37 +252,7 @@ void Engine<T>::printEngineInfo() const
     std::cout << "=========================" << std::endl;
 }
 
-cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(const cv::cuda::GpuMat &input, size_t height, size_t width,
-                                                        const cv::Scalar &bgcolor) {
-    float r = std::min(width / (input.cols * 1.0), height / (input.rows * 1.0));
-    int unpad_w = r * input.cols;
-    int unpad_h = r * input.rows;
-    cv::cuda::GpuMat re(unpad_h, unpad_w, CV_8UC3);
-    cv::cuda::resize(input, re, re.size());
-    cv::cuda::GpuMat out(height, width, CV_8UC3, bgcolor);
-    re.copyTo(out(cv::Rect(0, 0, re.cols, re.rows)));
-    return out;
-}
-
-void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output) {
-    if (input.size() != 1) {
-        std::cerr << "The feature vector has incorrect dimensions!" << std::endl;
-    }
-
-    output = std::move(input[0]);
-}
-
-void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<float> &output) {
-    if (input.size() != 1 || input[0].size() != 1) {
-        std::cerr << "The feature vector has incorrect dimensions!" << std::endl;
-    }
-
-    output = std::move(input[0][0]);
-}
-
-
-// Add explicit template instantiations for Engine<float>
-template Engine<float>::Engine(const std::string &engineFilename);
-template Engine<float>::~Engine();
-template void Engine<float>::getEngineInfo();
-template void Engine<float>::printEngineInfo() const;
+template TRTEngine<float>::TRTEngine(const std::string &engineFilename);
+template TRTEngine<float>::~TRTEngine();
+template void TRTEngine<float>::getEngineInfo();
+template void TRTEngine<float>::printEngineInfo() const;

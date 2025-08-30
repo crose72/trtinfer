@@ -1,7 +1,7 @@
 #include "tensorrt_infer.h"
 
-using sample::gLogError;
-using sample::gLogInfo;
+extern LogStreamConsumer gLogError;
+extern LogStreamConsumer gLogInfo;
 
 std::filesystem::path path_relative_to_exe(const std::filesystem::path &rel)
 {
@@ -92,7 +92,7 @@ TensorInfer::TensorInfer(const Config &config) : mConfig(config)
     std::vector<char> engineData(fsize);
     engineFile.read(engineData.data(), fsize);
 
-    mRuntime.reset(nvinfer1::createInferRuntime(sample::gLogger.getTRTLogger()));
+    mRuntime.reset(nvinfer1::createInferRuntime(gLogger.getTRTLogger()));
     mEngine.reset(mRuntime->deserializeCudaEngine(engineData.data(), fsize));
     assert(mEngine.get() != nullptr);
 
@@ -159,7 +159,7 @@ TensorInfer::TensorInfer(const std::string &engineFilename)
     std::vector<char> engineData(fsize);
     engineFile.read(engineData.data(), fsize);
 
-    mRuntime.reset(nvinfer1::createInferRuntime(sample::gLogger.getTRTLogger()));
+    mRuntime.reset(nvinfer1::createInferRuntime(gLogger.getTRTLogger()));
     mEngine.reset(mRuntime->deserializeCudaEngine(engineData.data(), fsize));
     assert(mEngine.get() != nullptr);
 

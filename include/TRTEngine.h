@@ -1,64 +1,17 @@
-#pragma once
-
 #include <NvInfer.h>
-#include "NvOnnxParser.h"
+#include <NvOnnxParser.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <NvInferRuntimePlugin.h>
 #include <opencv2/core/cuda.hpp>
-#include <opencv2/cudaarithm.hpp>
-#include <opencv2/cudaimgproc.hpp>
-#include <opencv2/cudawarping.hpp>
 #include <opencv2/opencv.hpp>
 #include <filesystem>
 #include <fstream>
+
 #include "logging.h"
+#include "IEngine.h"
 
-cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(const cv::cuda::GpuMat &input, size_t height, size_t width,
-                                                        const cv::Scalar &bgcolor = cv::Scalar(0, 0, 0));
-void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output);
-void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<float> &output);                                                        
-
-// Precision used for GPU inference
-enum class Precision
-{
-    // Full precision floating point value
-    FP32,
-    // Half prevision floating point value
-    FP16,
-    // Int8 quantization.
-    // Has reduced dynamic range, may result in slight loss in accuracy.
-    // If INT8 is selected, must provide path to calibration dataset directory.
-    INT8,
-};
-
-// Options for the network
-struct Options
-{
-    // Precision to use for GPU inference.
-    Precision precision = Precision::FP16;
-    // If INT8 precision is selected, must provide path to calibration dataset
-    // directory.
-    std::string calibrationDataDirectoryPath;
-    // The batch size to be used when computing calibration data for INT8
-    // inference. Should be set to as large a batch number as your GPU will
-    // support.
-    int32_t calibrationBatchSize = 128;
-    // The batch size which should be optimized for.
-    int32_t optBatchSize = 1;
-    // Maximum allowable batch size
-    int32_t maxBatchSize = 16;
-    // GPU device index
-    int deviceIndex = 0;
-    // Directory where the engine file should be saved
-    std::string engineFileDir = ".";
-    // Maximum allowed input width
-    int32_t maxInputWidth = -1; // Default to -1 --> expecting fixed input size
-    // Minimum allowed input width
-    int32_t minInputWidth = -1; // Default to -1 --> expecting fixed input size
-    // Optimal input width
-    int32_t optInputWidth = -1; // Default to -1 --> expecting fixed input size
-};
+extern Logger gLogger;
 
 /*
 Engine attributes
@@ -101,41 +54,55 @@ Engine requirements
     • Threading model decided (typically one context per thread/stream)
 (Build‑time, INT8 only) Calibration data/cache available
 */
-extern Logger gLogger;
 
 template <typename T>
-class IEngine
+class TRTEngine : public IEngine<T>
 {
 public:
-    virtual ~IEngine() = default;
-    virtual const std::vector<std::string> &getInputNames() const = 0;
-    virtual const std::vector<std::string> &getOutputNames() const = 0;
-    virtual const std::vector<nvinfer1::Dims> &getInputDims() const = 0;
-    virtual const std::vector<nvinfer1::Dims> &getOutputDims() const = 0;
-    virtual const std::vector<nvinfer1::TensorFormat> &getInputTensorFormat() const = 0;
-    virtual const std::vector<nvinfer1::TensorFormat> &getOutputTensorFormat() const = 0;
-    virtual const std::vector<nvinfer1::DataType> &getInputDataType() const = 0;
-    virtual const std::vector<nvinfer1::DataType> &getOutputDataType() const = 0;
-};
+    TRTEngine(const std::string &engineFilename);
+    TRTEngine();
+    ~TRTEngine();
+    // Precision used for GPU inference
+    enum class Precision
+    {
+        // Full precision floating point value
+        FP32,
+        // Half prevision floating point value
+        FP16,
+        // Int8 quantization.
+        // Has reduced dynamic range, may result in slight loss in accuracy.
+        // If INT8 is selected, must provide path to calibration dataset directory.
+        INT8,
+    };
 
-template <typename T>
-class Engine : public IEngine<T>
-{
-public:
-    Engine(const std::string &engineFilename);
-    Engine();
-    ~Engine();
-    /*
-    • Has input and output layers (tensor names & binding indices)
-    • Has input and output dims (incl. dynamic shape ranges per profile)
-    • Has batching model (explicit batch; batch dim location)
-    • Has precision & data types (fp32/fp16/int8; per‑binding DataType)
-    • Has tensor format/strides (e.g., kLINEAR, NCHW)
-    • Has number of bindings and metadata cache
-    • Has optimization profiles (min/opt/max shapes; active profile index)
-    • Has build config snapshot (workspace size, tactic sources, sparsity/DLA, fp16/int8 flags)
-    • Has version/device guards (TRT version, SM capability used to build)
-    */
+    // Options for the network
+    struct Options
+    {
+        // Precision to use for GPU inference.
+        Precision precision = Precision::FP16;
+        // If INT8 precision is selected, must provide path to calibration dataset
+        // directory.
+        std::string calibrationDataDirectoryPath;
+        // The batch size to be used when computing calibration data for INT8
+        // inference. Should be set to as large a batch number as your GPU will
+        // support.
+        int32_t calibrationBatchSize = 128;
+        // The batch size which should be optimized for.
+        int32_t optBatchSize = 1;
+        // Maximum allowable batch size
+        int32_t maxBatchSize = 16;
+        // GPU device index
+        int deviceIndex = 0;
+        // Directory where the engine file should be saved
+        std::string engineFileDir = ".";
+        // Maximum allowed input width
+        int32_t maxInputWidth = -1; // Default to -1 --> expecting fixed input size
+        // Minimum allowed input width
+        int32_t minInputWidth = -1; // Default to -1 --> expecting fixed input size
+        // Optimal input width
+        int32_t optInputWidth = -1; // Default to -1 --> expecting fixed input size
+    };
+
     void printEngineInfo(void) const;
     const std::vector<std::string> &getInputNames() const override { return mInputNames; };
     const std::vector<std::string> &getOutputNames() const override { return mOutputNames; };
@@ -155,8 +122,10 @@ public:
     //    subVals = {0.5f, 0.5f, 0.5f};
     //    divVals = {0.5f, 0.5f, 0.5f};
     //    normalize = true;
-    bool buildLoadNetwork(std::string onnxModelPath, const std::array<float, 3> &subVals = {0.f, 0.f, 0.f},
-                          const std::array<float, 3> &divVals = {1.f, 1.f, 1.f}, bool normalize = true);
+    bool buildLoadNetwork(const std::string &onnxModelPath,
+                          const std::array<float, 3> &subVals = {0.f, 0.f, 0.f},
+                          const std::array<float, 3> &divVals = {1.f, 1.f, 1.f},
+                          bool normalize = true);
 
     // Load a TensorRT engine file from disk into memory
     // The default implementation will normalize values between [0.f, 1.f]
@@ -166,8 +135,10 @@ public:
     //    subVals = {0.5f, 0.5f, 0.5f};
     //    divVals = {0.5f, 0.5f, 0.5f};
     //    normalize = true;
-    bool loadNetwork(std::string trtModelPath, const std::array<float, 3> &subVals = {0.f, 0.f, 0.f},
-                     const std::array<float, 3> &divVals = {1.f, 1.f, 1.f}, bool normalize = true);
+    bool loadNetwork(const std::string &trtModelPath,
+                     const std::array<float, 3> &subVals = {0.f, 0.f, 0.f},
+                     const std::array<float, 3> &divVals = {1.f, 1.f, 1.f},
+                     bool normalize = true);
 
     // Run inference.
     // Input format [input][batch][cv::cuda::GpuMat]
@@ -177,21 +148,19 @@ public:
 
 private:
     void getEngineInfo(void);
+    bool build(std::string onnxModelPath, const std::array<float, 3> &subVals, const std::array<float, 3> &divVals, bool normalize);
     void transformOutput(std::vector<std::vector<std::vector<T>>> &input, std::vector<std::vector<T>> &output);
     void transformOutput(std::vector<std::vector<std::vector<T>>> &input, std::vector<T> &output);
-
-
-    // Build the network
-    bool build(std::string onnxModelPath, const std::array<float, 3> &subVals, const std::array<float, 3> &divVals, bool normalize);
-
     void getDeviceNames(std::vector<std::string> &deviceNames);
     void clearGpuBuffers();
 
-    // Normalization, scaling, and mean subtraction of inputs
+    // Members
+    Options mOptions;
     std::array<float, 3> mSubVals{};
     std::array<float, 3> mDivVals{};
-    bool mNormalize;
+    bool mNormalize = true;
     std::string mEngineFilename;
+
     std::vector<std::string> mInputNames;
     std::vector<std::string> mOutputNames;
     std::vector<nvinfer1::Dims> mInputDims;
@@ -201,15 +170,87 @@ private:
     std::vector<nvinfer1::DataType> mInputDataTypes;
     std::vector<nvinfer1::DataType> mOutputDataTypes;
     std::vector<uint32_t> mOutputLengths{};
-    std::vector<std::string> mIOTensorNames;
-    int32_t mInputBatchSize;
-
     std::vector<void *> mBuffers;
+    int32_t mInputBatchSize = 1;
+    std::vector<std::string> mIOTensorNames;
 
     // Must keep IRuntime around for inference, see:
     // https://forums.developer.nvidia.com/t/is-it-safe-to-deallocate-nvinfer1-iruntime-after-creating-an-nvinfer1-icudaengine-but-before-running-inference-with-said-icudaengine/255381/2?u=cyruspk4w6
     std::unique_ptr<nvinfer1::IRuntime> mRuntime = nullptr;
-    // std::unique_ptr<Int8EntropyCalibrator2> mCalibrator = nullptr;
     std::unique_ptr<nvinfer1::ICudaEngine> mEngine = nullptr;
     std::unique_ptr<nvinfer1::IExecutionContext> mContext = nullptr;
+    // std::unique_ptr<Int8EntropyCalibrator2> mCalibrator = nullptr;
 };
+
+inline bool doesFileExist(const std::string &name)
+{
+    std::ifstream f(name.c_str());
+    return f.good();
+}
+
+inline void checkCudaErrorCode(cudaError_t code)
+{
+    if (code != cudaSuccess)
+    {
+        std::cerr << "CUDA operation failed with code: " + std::to_string(code) + " (" + cudaGetErrorName(code) +
+                         "), with message: " + cudaGetErrorString(code)
+                  << std::endl;
+    }
+}
+
+inline std::vector<std::string> getFilesInDirectory(const std::string &dirPath)
+{
+    std::vector<std::string> fileNames;
+    for (const auto &entry : std::filesystem::directory_iterator(dirPath))
+    {
+        if (entry.is_regular_file())
+            fileNames.push_back(entry.path().string());
+    }
+    return fileNames;
+}
+inline std::string getDataTypeString(nvinfer1::DataType dataType)
+{
+    switch (dataType)
+    {
+    case nvinfer1::DataType::kFLOAT:
+        return "FP32";
+    case nvinfer1::DataType::kHALF:
+        return "FP16";
+    case nvinfer1::DataType::kINT8:
+        return "INT8";
+    case nvinfer1::DataType::kINT32:
+        return "INT32";
+    case nvinfer1::DataType::kBOOL:
+        return "BOOL";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+inline std::string cnvrtTensorFormatToString(nvinfer1::TensorFormat format)
+{
+    switch (format)
+    {
+    case nvinfer1::TensorFormat::kLINEAR:
+        return "LINEAR";
+    case nvinfer1::TensorFormat::kCHW2:
+        return "CHW2";
+    case nvinfer1::TensorFormat::kHWC8:
+        return "HWC8";
+    case nvinfer1::TensorFormat::kCHW4:
+        return "CHW4";
+    case nvinfer1::TensorFormat::kCHW16:
+        return "CHW16";
+    case nvinfer1::TensorFormat::kCHW32:
+        return "CHW32";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+inline std::filesystem::path path_relative_to_exe(const std::filesystem::path &rel)
+{
+    auto exe = std::filesystem::canonical("/proc/self/exe");
+    auto exe_dir = exe.parent_path(); // .../toplevel/build/exampleResnet50
+    return std::filesystem::weakly_canonical(exe_dir / rel);
+}

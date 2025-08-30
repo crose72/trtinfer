@@ -20,57 +20,61 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <filesystem>
 
 #include "NvInfer.h"
 
 namespace util
 {
 
-size_t getMemorySize(const nvinfer1::Dims& dims, const int32_t elem_size);
+    size_t getMemorySize(const nvinfer1::Dims &dims, const int32_t elem_size);
 
-struct PPM
-{
-    std::string filename;
-    std::string magic;
-    int c;
-    int h;
-    int w;
-    int max;
-    std::vector<uint8_t> buffer;
-};
+    struct PPM
+    {
+        std::string filename;
+        std::string magic;
+        int c;
+        int h;
+        int w;
+        int max;
+        std::vector<uint8_t> buffer;
+    };
 
-class ImageBase
-{
-public:
-    ImageBase(const std::string& filename, const nvinfer1::Dims& dims);
-    virtual ~ImageBase() {}
-    virtual size_t volume() const;
-    void read();
-    void write();
-protected:
-    nvinfer1::Dims mDims;
-    PPM mPPM;
-};
+    class ImageBase
+    {
+    public:
+        ImageBase(const std::string &filename, const nvinfer1::Dims &dims);
+        virtual ~ImageBase() {}
+        virtual size_t volume() const;
+        void read();
+        void write();
 
-class RGBImageReader : public ImageBase
-{
-public:
-    RGBImageReader(const std::string& filename, const nvinfer1::Dims& dims, const std::vector<float>& mean, const std::vector<float>& std);
-    std::unique_ptr<float> process() const;
-private:
-    std::vector<float> mMean;
-    std::vector<float> mStd;
-};
+    protected:
+        nvinfer1::Dims mDims;
+        PPM mPPM;
+    };
 
-class ArgmaxImageWriter : public ImageBase
-{
-public:
-    ArgmaxImageWriter(const std::string& filename, const nvinfer1::Dims& dims, const std::vector<int>& palette, const int num_classes);
-    void process(const int* buffer);
-private:
-    int mNumClasses;
-    std::vector<int> mPalette;
-};
+    class RGBImageReader : public ImageBase
+    {
+    public:
+        RGBImageReader(const std::string &filename, const nvinfer1::Dims &dims, const std::vector<float> &mean, const std::vector<float> &std);
+        std::unique_ptr<float> process() const;
+
+    private:
+        std::vector<float> mMean;
+        std::vector<float> mStd;
+    };
+
+    class ArgmaxImageWriter : public ImageBase
+    {
+    public:
+        ArgmaxImageWriter(const std::string &filename, const nvinfer1::Dims &dims, const std::vector<int> &palette, const int num_classes);
+        void process(const int *buffer);
+
+    private:
+        int mNumClasses;
+        std::vector<int> mPalette;
+    };
 
 }; // namespace util
 
