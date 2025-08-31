@@ -1,3 +1,5 @@
+#pragma once
+
 #include <NvInfer.h>
 #include <NvOnnxParser.h>
 #include <cuda_fp16.h>
@@ -7,11 +9,10 @@
 #include <opencv2/opencv.hpp>
 #include <filesystem>
 #include <fstream>
+#include <spdlog/spdlog.h>
 
 #include "logging.h"
 #include "IEngine.h"
-
-extern Logger gLogger;
 
 /*
 Engine attributes
@@ -173,84 +174,15 @@ private:
     std::vector<void *> mBuffers;
     int32_t mInputBatchSize = 1;
     std::vector<std::string> mIOTensorNames;
+    Logger mLogger;
 
     // Must keep IRuntime around for inference, see:
     // https://forums.developer.nvidia.com/t/is-it-safe-to-deallocate-nvinfer1-iruntime-after-creating-an-nvinfer1-icudaengine-but-before-running-inference-with-said-icudaengine/255381/2?u=cyruspk4w6
-    std::unique_ptr<nvinfer1::IRuntime> mRuntime = nullptr;
+    std::unique_ptr<nvinfer1::IRuntime>
+        mRuntime = nullptr;
     std::unique_ptr<nvinfer1::ICudaEngine> mEngine = nullptr;
     std::unique_ptr<nvinfer1::IExecutionContext> mContext = nullptr;
     // std::unique_ptr<Int8EntropyCalibrator2> mCalibrator = nullptr;
 };
 
-inline bool doesFileExist(const std::string &name)
-{
-    std::ifstream f(name.c_str());
-    return f.good();
-}
-
-inline void checkCudaErrorCode(cudaError_t code)
-{
-    if (code != cudaSuccess)
-    {
-        std::cerr << "CUDA operation failed with code: " + std::to_string(code) + " (" + cudaGetErrorName(code) +
-                         "), with message: " + cudaGetErrorString(code)
-                  << std::endl;
-    }
-}
-
-inline std::vector<std::string> getFilesInDirectory(const std::string &dirPath)
-{
-    std::vector<std::string> fileNames;
-    for (const auto &entry : std::filesystem::directory_iterator(dirPath))
-    {
-        if (entry.is_regular_file())
-            fileNames.push_back(entry.path().string());
-    }
-    return fileNames;
-}
-inline std::string getDataTypeString(nvinfer1::DataType dataType)
-{
-    switch (dataType)
-    {
-    case nvinfer1::DataType::kFLOAT:
-        return "FP32";
-    case nvinfer1::DataType::kHALF:
-        return "FP16";
-    case nvinfer1::DataType::kINT8:
-        return "INT8";
-    case nvinfer1::DataType::kINT32:
-        return "INT32";
-    case nvinfer1::DataType::kBOOL:
-        return "BOOL";
-    default:
-        return "UNKNOWN";
-    }
-}
-
-inline std::string cnvrtTensorFormatToString(nvinfer1::TensorFormat format)
-{
-    switch (format)
-    {
-    case nvinfer1::TensorFormat::kLINEAR:
-        return "LINEAR";
-    case nvinfer1::TensorFormat::kCHW2:
-        return "CHW2";
-    case nvinfer1::TensorFormat::kHWC8:
-        return "HWC8";
-    case nvinfer1::TensorFormat::kCHW4:
-        return "CHW4";
-    case nvinfer1::TensorFormat::kCHW16:
-        return "CHW16";
-    case nvinfer1::TensorFormat::kCHW32:
-        return "CHW32";
-    default:
-        return "UNKNOWN";
-    }
-}
-
-inline std::filesystem::path path_relative_to_exe(const std::filesystem::path &rel)
-{
-    auto exe = std::filesystem::canonical("/proc/self/exe");
-    auto exe_dir = exe.parent_path(); // .../toplevel/build/exampleResnet50
-    return std::filesystem::weakly_canonical(exe_dir / rel);
-}
+#include "TRTEngine.inl"
