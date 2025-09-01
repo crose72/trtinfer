@@ -1,3 +1,15 @@
+#include <opencv2/cudaarithm.hpp>
+
+#define CHECK(condition)                                                                                                           \
+    do                                                                                                                             \
+    {                                                                                                                              \
+        if (!(condition))                                                                                                          \
+        {                                                                                                                          \
+            spdlog::error("Assertion failed: ({}), function {}, file {}, line {}.", #condition, __FUNCTION__, __FILE__, __LINE__); \
+            abort();                                                                                                               \
+        }                                                                                                                          \
+    } while (false);
+
 inline bool doesFileExist(const std::string &name);
 inline void checkCudaErrorCode(cudaError_t code);
 inline std::vector<std::string> getFilesInDirectory(const std::string &dirPath);
@@ -84,13 +96,7 @@ inline std::filesystem::path path_relative_to_exe(const std::filesystem::path &r
 // TensorRT engine functions
 
 template <typename T>
-TRTEngine<T>::TRTEngine(const std::string &engineFilename)
-    : mEngineFilename(engineFilename),
-      mEngine(nullptr)
-{
-
-    getEngineInfo();
-}
+TRTEngine<T>::TRTEngine(const std::string &engineFilename) : mEngineFilename(engineFilename) {}
 
 template <typename T>
 TRTEngine<T>::TRTEngine(void) {}
@@ -313,6 +319,12 @@ void TRTEngine<T>::printEngineInfo() const
 }
 
 template <typename T>
+bool TRTEngine<T>::loadNetwork()
+{
+    return loadNetwork(mEngineFilename, mSubVals, mDivVals, mNormalize);
+}
+
+template <typename T>
 bool TRTEngine<T>::loadNetwork(const std::string &trtModelPath,
                                const std::array<float, 3> &subVals,
                                const std::array<float, 3> &divVals,
@@ -382,6 +394,143 @@ bool TRTEngine<T>::loadNetwork(const std::string &trtModelPath,
     }
 
     getEngineInfo();
+
+    return true;
+}
+
+template <typename T>
+cv::cuda::GpuMat TRTEngine<T>::blobFromGpuMats(const std::vector<cv::cuda::GpuMat> &batchInput,
+                                               const std::array<float, 3> &subVals,
+                                               const std::array<float, 3> &divVals,
+                                               bool normalize,
+                                               bool swapRB)
+{
+
+    CHECK(!batchInput.empty())
+    CHECK(batchInput[0].channels() == 3)
+
+    cv::cuda::GpuMat gpu_dst(1, batchInput[0].rows * batchInput[0].cols * batchInput.size(), CV_8UC3);
+
+    size_t width = batchInput[0].cols * batchInput[0].rows;
+    if (swapRB)
+    {
+        for (size_t img = 0; img < batchInput.size(); ++img)
+        {
+            std::vector<cv::cuda::GpuMat> input_channels{
+                cv::cuda::GpuMat(batchInput[0].rows, batchInput[0].cols, CV_8U, &(gpu_dst.ptr()[width * 2 + width * 3 * img])),
+                cv::cuda::GpuMat(batchInput[0].rows, batchInput[0].cols, CV_8U, &(gpu_dst.ptr()[width + width * 3 * img])),
+                cv::cuda::GpuMat(batchInput[0].rows, batchInput[0].cols, CV_8U, &(gpu_dst.ptr()[0 + width * 3 * img]))};
+            cv::cuda::split(batchInput[img], input_channels); // HWC -> CHW
+        }
+    }
+    else
+    {
+        for (size_t img = 0; img < batchInput.size(); ++img)
+        {
+            std::vector<cv::cuda::GpuMat> input_channels{
+                cv::cuda::GpuMat(batchInput[0].rows, batchInput[0].cols, CV_8U, &(gpu_dst.ptr()[0 + width * 3 * img])),
+                cv::cuda::GpuMat(batchInput[0].rows, batchInput[0].cols, CV_8U, &(gpu_dst.ptr()[width + width * 3 * img])),
+                cv::cuda::GpuMat(batchInput[0].rows, batchInput[0].cols, CV_8U, &(gpu_dst.ptr()[width * 2 + width * 3 * img]))};
+            cv::cuda::split(batchInput[img], input_channels); // HWC -> CHW
+        }
+    }
+    cv::cuda::GpuMat mfloat;
+    if (normalize)
+    {
+        // [0.f, 1.f]
+        gpu_dst.convertTo(mfloat, CV_32FC3, 1.f / 255.f);
+    }
+    else
+    {
+        // [0.f, 255.f]
+        gpu_dst.convertTo(mfloat, CV_32FC3);
+    }
+
+    // Apply scaling and mean subtraction
+    cv::cuda::subtract(mfloat, cv::Scalar(subVals[0], subVals[1], subVals[2]), mfloat, cv::noArray(), -1);
+    cv::cuda::divide(mfloat, cv::Scalar(divVals[0], divVals[1], divVals[2]), mfloat, 1, -1);
+
+    return mfloat;
+}
+
+template <typename T>
+bool TRTEngine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>> &inputs,
+                                std::vector<std::vector<std::vector<T>>> &featureVectors)
+{
+    // Create the cuda stream that will be used for inference
+    cudaStream_t inferenceCudaStream;
+    checkCudaErrorCode(cudaStreamCreate(&inferenceCudaStream));
+
+    std::vector<cv::cuda::GpuMat> preprocessedInputs;
+    const int32_t numInputs = mInputDims.size();
+
+    // Preprocess all the input tensors
+    for (size_t i = 0; i < mInputDims.size(); ++i)
+    {
+        const auto &batchInput = inputs[i];
+        // OpenCV reads images into memory in NHWC format, while TensorRT expects
+        // images in NCHW format. The following method converts NHWC to NCHW. Even
+        // though TensorRT expects NCHW at IO, during optimization, it can
+        // internally use NHWC to optimize cuda kernels See:
+        // https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html#data-layout
+        // Copy over the input data and perform the preprocessing
+        auto mfloat = blobFromGpuMats(batchInput, mSubVals, mDivVals, mNormalize);
+        preprocessedInputs.push_back(mfloat);
+        mBuffers[i] = mfloat.ptr<void>();
+    }
+
+    // Ensure all dynamic bindings have been defined.
+    if (!mContext->allInputDimensionsSpecified())
+    {
+        auto msg = "Error, not all required dimensions specified.";
+        spdlog::error(msg);
+        throw std::runtime_error(msg);
+    }
+
+    // Set the address of the input and output buffers
+    for (size_t i = 0; i < mBuffers.size(); ++i)
+    {
+        bool status = mContext->setTensorAddress(mIOTensorNames[i].c_str(), mBuffers[i]);
+        if (!status)
+        {
+            return false;
+        }
+    }
+
+    // Run inference.
+    bool status = mContext->enqueueV3(inferenceCudaStream);
+    if (!status)
+    {
+        return false;
+    }
+
+    // Copy the outputs back to CPU
+    featureVectors.clear();
+
+    const auto batchSize = static_cast<int32_t>(inputs[0].size());
+    for (int batch = 0; batch < batchSize; ++batch)
+    {
+        // Batch
+        std::vector<std::vector<T>> batchOutputs{};
+        for (int32_t outputBinding = numInputs; outputBinding < mEngine->getNbIOTensors(); ++outputBinding)
+        {
+            // We start at index mInputDims.size() to account for the inputs in our
+            // mBuffers
+            std::vector<T> output;
+            auto outputLength = mOutputLengths[outputBinding - numInputs];
+            output.resize(outputLength);
+            // Copy the output
+            checkCudaErrorCode(cudaMemcpyAsync(output.data(),
+                                               static_cast<char *>(mBuffers[outputBinding]) + (batch * sizeof(T) * outputLength),
+                                               outputLength * sizeof(T), cudaMemcpyDeviceToHost, inferenceCudaStream));
+            batchOutputs.emplace_back(std::move(output));
+        }
+        featureVectors.emplace_back(std::move(batchOutputs));
+    }
+
+    // Synchronize the cuda stream
+    checkCudaErrorCode(cudaStreamSynchronize(inferenceCudaStream));
+    checkCudaErrorCode(cudaStreamDestroy(inferenceCudaStream));
 
     return true;
 }

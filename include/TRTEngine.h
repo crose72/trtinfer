@@ -140,6 +140,7 @@ public:
                      const std::array<float, 3> &subVals = {0.f, 0.f, 0.f},
                      const std::array<float, 3> &divVals = {1.f, 1.f, 1.f},
                      bool normalize = true);
+    bool loadNetwork(void);
 
     // Run inference.
     // Input format [input][batch][cv::cuda::GpuMat]
@@ -149,7 +150,16 @@ public:
 
 private:
     void getEngineInfo(void);
-    bool build(std::string onnxModelPath, const std::array<float, 3> &subVals, const std::array<float, 3> &divVals, bool normalize);
+    bool build(std::string onnxModelPath,
+               const std::array<float, 3> &subVals,
+               const std::array<float, 3> &divVals,
+               bool normalize);
+    // Convert NHWC to NCHW and apply scaling and mean subtraction
+    static cv::cuda::GpuMat blobFromGpuMats(const std::vector<cv::cuda::GpuMat> &batchInput,
+                                            const std::array<float, 3> &subVals,
+                                            const std::array<float, 3> &divVals,
+                                            bool normalize,
+                                            bool swapRB = false);
     void transformOutput(std::vector<std::vector<std::vector<T>>> &input, std::vector<std::vector<T>> &output);
     void transformOutput(std::vector<std::vector<std::vector<T>>> &input, std::vector<T> &output);
     void getDeviceNames(std::vector<std::string> &deviceNames);
