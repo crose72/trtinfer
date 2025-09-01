@@ -184,6 +184,7 @@ private:
     std::vector<void *> mBuffers;
     int32_t mInputBatchSize = 1;
     std::vector<std::string> mIOTensorNames;
+    std::vector<nvinfer1::TensorIOMode> mTensorTypes;
     Logger mLogger;
 
     // Must keep IRuntime around for inference, see:

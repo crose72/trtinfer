@@ -93,6 +93,21 @@ inline std::filesystem::path path_relative_to_exe(const std::filesystem::path &r
     return std::filesystem::weakly_canonical(exe_dir / rel);
 }
 
+template <typename T>
+void TRTEngine<T>::clearGpuBuffers()
+{
+    if (!mBuffers.empty())
+    {
+        // Free GPU memory of outputs
+        const auto numInputs = mInputDims.size();
+        for (int32_t outputBinding = numInputs; outputBinding < mEngine->getNbIOTensors(); ++outputBinding)
+        {
+            checkCudaErrorCode(cudaFree(mBuffers[outputBinding]));
+        }
+        mBuffers.clear();
+    }
+}
+
 // TensorRT engine functions
 
 template <typename T>
@@ -117,6 +132,7 @@ void TRTEngine<T>::getEngineInfo(void)
         const nvinfer1::TensorIOMode tensorType = mEngine->getTensorIOMode(tensorName);
         const nvinfer1::Dims tensorShape = mEngine->getTensorShape(tensorName);
         const nvinfer1::DataType tensorDataType = mEngine->getTensorDataType(tensorName);
+        mTensorTypes.push_back(tensorType);
 
         // Tensor is an input
         if (tensorType == nvinfer1::TensorIOMode::kINPUT)
@@ -209,6 +225,7 @@ void TRTEngine<T>::getEngineInfo(void)
             // possible batch size (although we could actually end up using less
             // memory)
             // TODO - could keep as a max memory size limit? probably delete though
+            // was used for allocating the output memory before inference - move the logic?
             // checkCudaErrorCode(cudaMallocAsync(&mBuffers[tensor], outputLength * mOptions.maxBatchSize * sizeof(T), stream));
         }
         else
@@ -394,6 +411,30 @@ bool TRTEngine<T>::loadNetwork(const std::string &trtModelPath,
     }
 
     getEngineInfo();
+
+    // Storage for holding the input and output buffers
+    // This will be passed to TensorRT for inference
+    clearGpuBuffers();
+    mBuffers.resize(mTensorTypes.size());
+
+    // Create a cuda stream
+    cudaStream_t stream;
+    checkCudaErrorCode(cudaStreamCreate(&stream));
+
+    for (int i = 0; i < mTensorTypes.size(); ++i)
+    {
+        if (mTensorTypes[i] == nvinfer1::TensorIOMode::kOUTPUT)
+        {
+            // Now size the output buffer appropriately, taking into account the max
+            // possible batch size (although we could actually end up using less
+            // memory)
+            checkCudaErrorCode(cudaMallocAsync(&mBuffers[i], mOutputLengths[i] * mOptions.maxBatchSize * sizeof(T), stream));
+        }
+    }
+
+    // Synchronize and destroy the cuda stream
+    checkCudaErrorCode(cudaStreamSynchronize(stream));
+    checkCudaErrorCode(cudaStreamDestroy(stream));
 
     return true;
 }
