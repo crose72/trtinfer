@@ -63,7 +63,8 @@ public:
     TRTEngine(const std::string &engineFilename);
     TRTEngine();
     ~TRTEngine();
-    // Precision used for GPU inference
+
+    // Precision to build TRT engine with for GPU inference
     enum class Precision
     {
         // Full precision floating point value
@@ -76,7 +77,7 @@ public:
         INT8,
     };
 
-    // Options for the network
+    // Options for building a TRT engine
     struct Options
     {
         // Precision to use for GPU inference.
@@ -170,8 +171,11 @@ private:
     std::array<float, 3> mSubVals{};
     std::array<float, 3> mDivVals{};
     bool mNormalize = true;
+    int mDeviceIndex = 0;
+    int32_t mMaxBatchSize = 1;
+    int32_t mOptProfileIndex = 0;
+    int32_t mInputBatchSize = 1;
     std::string mEngineFilename;
-
     std::vector<std::string> mInputNames;
     std::vector<std::string> mOutputNames;
     std::vector<nvinfer1::Dims> mInputDims;
@@ -182,7 +186,6 @@ private:
     std::vector<nvinfer1::DataType> mOutputDataTypes;
     std::vector<uint32_t> mOutputLengths{};
     std::vector<void *> mBuffers;
-    int32_t mInputBatchSize = 1;
     std::vector<std::string> mIOTensorNames;
     std::vector<nvinfer1::TensorIOMode> mTensorTypes;
     Logger mLogger;

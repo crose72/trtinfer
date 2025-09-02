@@ -1,4 +1,5 @@
 #include <opencv2/cudaarithm.hpp>
+#include <algorithm>
 
 #define CHECK(condition)                                                                                                           \
     do                                                                                                                             \
@@ -154,6 +155,12 @@ void TRTEngine<T>::getEngineInfo(void)
             mInputTensorFormats.emplace_back(mEngine->getTensorFormat(tensorName));
             mInputDataTypes.emplace_back(mEngine->getTensorDataType(tensorName));
             mInputBatchSize = tensorShape.d[0];
+            /* only works for tensors that are shape bindings - dynamic shapes
+            int32_t const *inputProfileMaxSize = mEngine->getProfileTensorValues(
+                tensorName,
+                mOptProfileIndex, // profile index: 0 if you only have one
+                nvinfer1::OptProfileSelector::kMAX);*/
+            mMaxBatchSize = std::max((int32_t)tensorShape.d[0], mMaxBatchSize);
         }
         else if (tensorType == nvinfer1::TensorIOMode::kOUTPUT)
         {
@@ -226,7 +233,7 @@ void TRTEngine<T>::getEngineInfo(void)
             // memory)
             // TODO - could keep as a max memory size limit? probably delete though
             // was used for allocating the output memory before inference - move the logic?
-            // checkCudaErrorCode(cudaMallocAsync(&mBuffers[tensor], outputLength * mOptions.maxBatchSize * sizeof(T), stream));
+            // checkCudaErrorCode(cudaMallocAsync(&mBuffers[tensor], outputLength * mMaxBatchSize * sizeof(T), stream));
         }
         else
         {
@@ -384,12 +391,12 @@ bool TRTEngine<T>::loadNetwork(const std::string &trtModelPath,
     }
 
     // Set the GPU device index
-    auto ret = cudaSetDevice(mOptions.deviceIndex);
+    auto ret = cudaSetDevice(mDeviceIndex);
     if (ret != 0)
     {
         int numGPUs;
         cudaGetDeviceCount(&numGPUs);
-        auto errMsg = "Unable to set GPU device index to: " + std::to_string(mOptions.deviceIndex) + ". Note, your device has " +
+        auto errMsg = "Unable to set GPU device index to: " + std::to_string(mDeviceIndex) + ". Note, your device has " +
                       std::to_string(numGPUs) + " CUDA-capable GPU(s).";
         spdlog::error(errMsg);
         throw std::runtime_error(errMsg);
@@ -428,7 +435,7 @@ bool TRTEngine<T>::loadNetwork(const std::string &trtModelPath,
             // Now size the output buffer appropriately, taking into account the max
             // possible batch size (although we could actually end up using less
             // memory)
-            checkCudaErrorCode(cudaMallocAsync(&mBuffers[i], mOutputLengths[i] * mOptions.maxBatchSize * sizeof(T), stream));
+            checkCudaErrorCode(cudaMallocAsync(&mBuffers[i], mOutputLengths[i] * mMaxBatchSize * sizeof(T), stream));
         }
     }
 
