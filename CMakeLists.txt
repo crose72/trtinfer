@@ -16,16 +16,16 @@ find_package(fmt REQUIRED)
 file(GLOB TENSORRT_INFER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 
 # Build the static library
-add_library(tensorrtinfer STATIC ${TENSORRT_INFER_SOURCES})
+add_library(trtinfer STATIC ${TENSORRT_INFER_SOURCES})
 
-target_include_directories(tensorrtinfer PUBLIC
+target_include_directories(trtinfer PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${OpenCV_INCLUDE_DIRS}
     ${TensorRT_INCLUDE_DIRS}
     /usr/local/cuda/include
 )
 
-target_link_libraries(tensorrtinfer
+target_link_libraries(trtinfer
     ${OpenCV_LIBS}
     cudart
     nvinfer

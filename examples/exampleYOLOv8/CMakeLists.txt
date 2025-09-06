@@ -19,5 +19,5 @@ target_link_libraries(exampleYOLOv8
     ${OpenCV_LIBS}
     cudart
     nvinfer
-    tensorrtinfer
+    trtinfer
     )
