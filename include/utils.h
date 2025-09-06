@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cuda_runtime.h>
+#include <cuda_fp16.h>
 #include <vector>
 #include <string>
 #include <fstream>
@@ -26,6 +27,8 @@ inline cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(
     const cv::Scalar &bgcolor = cv::Scalar(0, 0, 0));
 inline void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output);
 inline void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<float> &output);
+inline void transformOutput(std::vector<std::vector<std::vector<__half>>> &input, std::vector<std::vector<float>> &output);
+inline void transformOutput(std::vector<std::vector<std::vector<__half>>> &input, std::vector<float> &output);
 
 #define CHECK(condition)                                                                                                           \
     do                                                                                                                             \
@@ -198,4 +201,40 @@ inline void transformOutput(std::vector<std::vector<std::vector<float>>> &input,
     }
 
     output = std::move(input[0]);
+}
+
+/**
+ * @brief Flattens a nested 3D feature vector (size 1x1xN) into a 1D output vector.
+ * @param input Input feature vector (nested).
+ * @param output Output vector (flattened).
+ * @throws std::logic_error if input is not 1x1.
+ */
+inline void transformOutput(std::vector<std::vector<std::vector<__half>>> &input, std::vector<float> &output)
+{
+    if (input.size() != 1 || input[0].size() != 1)
+        throw std::logic_error("The feature vector has incorrect dimensions!");
+    auto &src = input[0][0];
+    output.resize(src.size());
+    for (size_t i = 0; i < src.size(); ++i)
+        output[i] = __half2float(src[i]);
+}
+
+/**
+ * @brief Flattens a nested 3D feature vector (size 1xNxM) into a 2D output vector.
+ * @param input Input feature vector (nested).
+ * @param output Output vector (2D, flattened batch).
+ * @throws std::logic_error if input batch size is not 1.
+ */
+inline void transformOutput(std::vector<std::vector<std::vector<__half>>> &input, std::vector<std::vector<float>> &output)
+{
+    if (input.size() != 1)
+        throw std::logic_error("The feature vector has incorrect dimensions!");
+    output.resize(input[0].size());
+    for (size_t i = 0; i < input[0].size(); ++i)
+    {
+        auto &src = input[0][i];
+        output[i].resize(src.size());
+        for (size_t j = 0; j < src.size(); ++j)
+            output[i][j] = __half2float(src[j]);
+    }
 }

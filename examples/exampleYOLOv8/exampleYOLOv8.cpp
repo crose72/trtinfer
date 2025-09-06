@@ -2,15 +2,45 @@
 
 int main(void)
 {
-    // Create engine directly from engine file path
     YOLOv8::Config config;
-    YOLOv8 yolo("/workspace/examples/exampleYOLOv8/yolov8s.engine", config);
-    // yolo.printEngineInfo();
-    std::string image = "/workspace/examples/exampleYOLOv8/elephant.jpg";
-    cv::Mat testImage = cv::imread(image);
-    std::vector<Object> detections = yolo.detectObjects(testImage);
-    yolo.drawObjectLabels(testImage, detections);
-    cv::imwrite("result.jpg", testImage);
+    YOLOv8 yolo("/workspace/examples/exampleYOLOv8/yolov8s_fp16.engine", config);
     yolo.printEngineInfo();
+
+    // Open the video file or camera
+    std::string video_path = "/workspace/examples/exampleYOLOv8/soccer.mp4"; // <--- YOUR VIDEO PATH
+    cv::VideoCapture cap(video_path);
+    if (!cap.isOpened())
+    {
+        std::cerr << "Error opening video: " << video_path << std::endl;
+        return -1;
+    }
+
+    cv::Mat frame;
+
+    while (true)
+    {
+        cap >> frame;
+        if (frame.empty())
+            break; // End of video
+
+        // Detect objects in the current frame
+        std::vector<Object> detections = yolo.detectObjects(frame);
+
+        // Draw results
+        yolo.drawObjectLabels(frame, detections);
+
+        // Show the frame
+        cv::imshow("YOLOv8 Detection", frame);
+
+        // Exit on ESC
+        char key = (char)cv::waitKey(1);
+        if (key == 27)
+            break;
+    }
+
+    cap.release();
+    cv::destroyAllWindows();
+    return 0;
+
     return 0;
 }
