@@ -160,6 +160,7 @@ void TRTEngine<T>::getEngineInfo(void)
                 tensorName,
                 mOptProfileIndex, // profile index: 0 if you only have one
                 nvinfer1::OptProfileSelector::kMAX);*/
+            std::cout << "TensorShape[d[0]]: " << tensorShape.d[0] << std::endl;
             mMaxBatchSize = std::max((int32_t)tensorShape.d[0], mMaxBatchSize);
         }
         else if (tensorType == nvinfer1::TensorIOMode::kOUTPUT)
@@ -221,6 +222,11 @@ void TRTEngine<T>::getEngineInfo(void)
                 // We ignore j = 0 because that is the batch size, and we will take that
                 // into account when sizing the buffer
                 outputLength *= tensorShape.d[j];
+            }
+
+            if (tensorShape.d[0] == 1)
+            {
+                outputLength = outputLength / tensorShape.d[0];
             }
 
             // Populate the member variables of the class with engine information
@@ -427,15 +433,28 @@ bool TRTEngine<T>::loadNetwork(const std::string &trtModelPath,
     // Create a cuda stream
     cudaStream_t stream;
     checkCudaErrorCode(cudaStreamCreate(&stream));
+    int outputIndex = 0;
 
     for (int i = 0; i < mTensorTypes.size(); ++i)
     {
         if (mTensorTypes[i] == nvinfer1::TensorIOMode::kOUTPUT)
         {
+            std::cout << "[DEBUG] Allocating OUTPUT buffer " << i
+                      << " size: " << mOutputLengths[outputIndex] << " * " << mMaxBatchSize
+                      << " * " << sizeof(T) << " = " << (mOutputLengths[outputIndex] * mMaxBatchSize * sizeof(T)) << " bytes\n";
+            for (int j = 0; j < mOutputLengths.size(); ++j)
+            {
+                std::cout << "mOutputLengths " << mOutputLengths[outputIndex] << " " << std::endl;
+            }
             // Now size the output buffer appropriately, taking into account the max
             // possible batch size (although we could actually end up using less
             // memory)
-            checkCudaErrorCode(cudaMallocAsync(&mBuffers[i], mOutputLengths[i] * mMaxBatchSize * sizeof(T), stream));
+            checkCudaErrorCode(cudaMallocAsync(&mBuffers[i], mOutputLengths[outputIndex] * mMaxBatchSize * sizeof(T), stream));
+            ++outputIndex;
+        }
+        else // INPUT
+        {
+            mBuffers[i] = nullptr; // EXPLICITLY SET INPUT BUFFERS TO NULLPTR!
         }
     }
 
