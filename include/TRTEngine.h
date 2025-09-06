@@ -14,48 +14,6 @@
 #include "logging.h"
 #include "IEngine.h"
 
-/*
-Engine attributes
-    • Has input and output layers (tensor names & binding indices)
-    • Has input and output dims (incl. dynamic shape ranges per profile)
-    • Has batching model (explicit batch; batch dim location)
-    • Has precision & data types (fp32/fp16/int8; per‑binding DataType)
-    • Has tensor format/strides (e.g., kLINEAR, NCHW)
-    • Has number of bindings and metadata cache
-    • Has optimization profiles (min/opt/max shapes; active profile index)
-    • Has build config snapshot (workspace size, tactic sources, sparsity/DLA, fp16/int8 flags)
-    • Has version/device guards (TRT version, SM capability used to build)
-
-Engine functionality
-    • Build engine (from ONNX or network) with options (fp16/int8; INT8 calibration path)
-    • Serialize engine to plan file
-    • Deserialize engine from plan file
-    • Create/destroy execution context(s) (support multiple for concurrency)
-    • Set active optimization profile on context
-    • Set binding dimensions (for dynamic shapes) before enqueue
-    • Query helpers: getBindingIndex(name), isInput(i), dataType(i), tensorFormat(i), dims(i)
-    • Allocate/Reallocate I/O buffers sized for current dims
-        ○ Device buffers (GPU)
-        ○ Pinned host buffers (fast H2D/D2H)
-    • Enqueue inference (enqueueV2) on a provided CUDA stream
-    • Warmup & profiling hooks (timings, NVTX ranges)
-    • Logging & error handling (TRT logger integration)
-
-Engine requirements
-    • Formatted input for this engine:
-        ○ Correct dtype
-        ○ Correct layout (e.g., NCHW for YOLO)
-        ○ Dims within profile range (for dynamic shapes)
-    • Execution context available and correctly configured (profile + binding dims)
-    • Allocated GPU memory for all bindings (sizes match current dims)
-    • CUDA stream provided (and sync policy defined)
-        ○ Sync before reading outputs or reusing buffers
-    • Host–Device transfer plan (use pinned memory; avoid needless copies)
-    • Device/Version compatibility (GPU supports fp16/int8 as used; TRT version match)
-    • Threading model decided (typically one context per thread/stream)
-(Build‑time, INT8 only) Calibration data/cache available
-*/
-
 template <typename T>
 class TRTEngine : public IEngine<T>
 {

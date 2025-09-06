@@ -2,51 +2,14 @@
 #include <algorithm>
 #include <opencv2/cudaimgproc.hpp>
 #include <opencv2/cudawarping.hpp>
+#include "utils.h"
 
-cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(
-    const cv::cuda::GpuMat &input,
-    size_t height,
-    size_t width,
-    const cv::Scalar &bgcolor = cv::Scalar(0, 0, 0));
-
-cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(
-    const cv::cuda::GpuMat &input,
-    size_t height, size_t width,
-    const cv::Scalar &bgcolor)
-{
-    float r = std::min(width / (input.cols * 1.0), height / (input.rows * 1.0));
-    int unpad_w = r * input.cols;
-    int unpad_h = r * input.rows;
-    cv::cuda::GpuMat re(unpad_h, unpad_w, CV_8UC3);
-    cv::cuda::resize(input, re, re.size());
-    cv::cuda::GpuMat out(height, width, CV_8UC3, bgcolor);
-    re.copyTo(out(cv::Rect(0, 0, re.cols, re.rows)));
-    return out;
-}
-
-void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<float> &output)
-{
-    if (input.size() != 1 || input[0].size() != 1)
-    {
-        auto msg = "The feature vector has incorrect dimensions!";
-        spdlog::error(msg);
-        throw std::logic_error(msg);
-    }
-    output = std::move(input[0][0]);
-}
-
-void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output)
-{
-    if (input.size() != 1)
-    {
-        auto msg = "The feature vector has incorrect dimensions!";
-        spdlog::error(msg);
-        throw std::logic_error(msg);
-    }
-
-    output = std::move(input[0]);
-}
-
+/**
+ * @brief YOLOv8 constructor. Loads a TensorRT engine from a model path and config.
+ * @param trtModelPath Path to TensorRT engine file.
+ * @param config YOLOv8 configuration parameters.
+ * @throws std::runtime_error if the engine cannot be loaded.
+ */
 YOLOv8::YOLOv8(const std::string &trtModelPath, const Config &config)
     : mDetectionThreshold(config.probabilityThreshold), mNMSThreshold(config.nmsThreshold), mTopK(config.topK),
       mSegChannels(config.segChannels), mSegHeight(config.segH), mSegWidth(config.segW), mSegThreshold(config.segmentationThreshold),
@@ -69,6 +32,11 @@ YOLOv8::YOLOv8(const std::string &trtModelPath, const Config &config)
     }
 }
 
+/**
+ * @brief Preprocesses a CUDA BGR image for YOLOv8 inference.
+ * @param gpuImg Input CUDA image (BGR).
+ * @return Nested vector suitable for batch inference input.
+ */
 std::vector<std::vector<cv::cuda::GpuMat>> YOLOv8::preprocess(const cv::cuda::GpuMat &gpuImg)
 {
     // Populate the input vectors
@@ -101,6 +69,11 @@ std::vector<std::vector<cv::cuda::GpuMat>> YOLOv8::preprocess(const cv::cuda::Gp
     return inputs;
 }
 
+/**
+ * @brief Run YOLOv8 inference and return detected objects (CUDA input).
+ * @param inputImageBGR Input CUDA image (BGR).
+ * @return Vector of detected objects.
+ */
 std::vector<Object> YOLOv8::detectObjects(const cv::cuda::GpuMat &inputImageBGR)
 {
     // Preprocess the input image
@@ -173,6 +146,11 @@ std::vector<Object> YOLOv8::detectObjects(const cv::cuda::GpuMat &inputImageBGR)
     return ret;
 }
 
+/**
+ * @brief Run YOLOv8 inference and return detected objects (CPU input).
+ * @param inputImageBGR Input OpenCV image (BGR, CPU memory).
+ * @return Vector of detected objects.
+ */
 std::vector<Object> YOLOv8::detectObjects(const cv::Mat &inputImageBGR)
 {
     // Upload the image to GPU memory
@@ -183,6 +161,11 @@ std::vector<Object> YOLOv8::detectObjects(const cv::Mat &inputImageBGR)
     return detectObjects(gpuImg);
 }
 
+/**
+ * @brief Post-process segmentation output tensors into object vector (YOLOv8 Segmentation).
+ * @param featureVectors Model output tensors (segmentation).
+ * @return Vector of detected objects with segmentation masks.
+ */
 std::vector<Object> YOLOv8::postProcessSegmentation(std::vector<std::vector<float>> &featureVectors)
 {
     const auto &outputDims = mEngine->getOutputDims();
@@ -308,6 +291,11 @@ std::vector<Object> YOLOv8::postProcessSegmentation(std::vector<std::vector<floa
     return objs;
 }
 
+/**
+ * @brief Post-process pose estimation output tensors into object vector.
+ * @param featureVector Model output tensor.
+ * @return Vector of detected objects with keypoints.
+ */
 std::vector<Object> YOLOv8::postprocessPose(std::vector<float> &featureVector)
 {
     const auto &outputDims = mEngine->getOutputDims();
@@ -396,6 +384,11 @@ std::vector<Object> YOLOv8::postprocessPose(std::vector<float> &featureVector)
     return objects;
 }
 
+/**
+ * @brief Post-process detection output tensors into object vector.
+ * @param featureVector Model output tensor.
+ * @return Vector of detected objects with bounding boxes.
+ */
 std::vector<Object> YOLOv8::postprocessDetect(std::vector<float> &featureVector)
 {
     const auto &outputDims = mEngine->getOutputDims();
@@ -471,6 +464,12 @@ std::vector<Object> YOLOv8::postprocessDetect(std::vector<float> &featureVector)
     return objects;
 }
 
+/**
+ * @brief Draw object bounding boxes, labels, and masks (if present) on an image.
+ * @param image OpenCV image (CPU memory) to annotate.
+ * @param objects Vector of detected objects.
+ * @param scale Drawing scale (default: 1).
+ */
 void YOLOv8::drawObjectLabels(cv::Mat &image, const std::vector<Object> &objects, unsigned int scale)
 {
     // If segmentation information is present, start with that

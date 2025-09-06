@@ -9,7 +9,7 @@
 #include "NvInfer.h"
 #include "NvOnnxParser.h"
 #include "logger.h"
-#include "util.h"
+#include "tensorrt_infer_utils.h"
 
 // For postprocessing
 #include <algorithm> // partial_sort, min

@@ -3,7 +3,7 @@
 extern LogStreamConsumer gLogError;
 extern LogStreamConsumer gLogInfo;
 
-std::filesystem::path path_relative_to_exe(const std::filesystem::path &rel)
+std::filesystem::path relativePath(const std::filesystem::path &rel)
 {
     auto exe = std::filesystem::canonical("/proc/self/exe");
     auto exe_dir = exe.parent_path(); // .../toplevel/build/exampleResnet50
@@ -71,7 +71,7 @@ TensorInfer::TensorInfer(const Config &config) : mConfig(config)
     std::unique_ptr<nvinfer1::IExecutionContext> mContext;
     cudaStream_t mStream = nullptr;
 
-    std::filesystem::path enginePath = path_relative_to_exe(mEngineFilename);
+    std::filesystem::path enginePath = relativePath(mEngineFilename);
 
     gLogInfo << "[Engine] Resolved path = " << enginePath << std::endl;
     gLogInfo << "[Engine] Exists? "
@@ -138,7 +138,7 @@ TensorInfer::TensorInfer(const Config &config) : mConfig(config)
 TensorInfer::TensorInfer(const std::string &engineFilename)
     : mEngineFilename(engineFilename), mEngine(nullptr)
 {
-    std::filesystem::path enginePath = path_relative_to_exe(engineFilename);
+    std::filesystem::path enginePath = relativePath(engineFilename);
 
     gLogInfo << "[Engine] Resolved path = " << enginePath << std::endl;
     gLogInfo << "[Engine] Exists? "
