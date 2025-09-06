@@ -3,7 +3,7 @@
 int main(void)
 {
     YOLOv8::Config config;
-    YOLOv8 yolo("/workspace/examples/exampleYOLOv8/yolov8s_fp16.engine", config);
+    YOLOv8 yolo("/workspace/examples/exampleYOLOv8/yolov8s.engine", config);
     yolo.printEngineInfo();
 
     // Open the video file or camera
