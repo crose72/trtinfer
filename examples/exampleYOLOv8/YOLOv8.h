@@ -57,7 +57,7 @@ public:
             "teddy bear", "hair drier", "toothbrush"};
     };
 
-    YOLOv8(const std::string &onnxModelPath, const std::string &trtModelPath, const Config &config);
+    YOLOv8(const std::string &trtModelPath, const Config &config);
 
     // Run inference: input is CPU or GPU Mat (single image)
     std::vector<Object> detectObjects(const cv::Mat &inputImageBGR);

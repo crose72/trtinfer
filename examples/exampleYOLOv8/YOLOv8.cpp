@@ -67,28 +67,6 @@ YOLOv8::YOLOv8(const std::string &trtModelPath, const Config &config)
     {
         throw std::runtime_error("Error: Neither ONNX model nor TensorRT engine path provided.");
     }
-
-    // DEBUG PRINT
-    std::cout << "[YOLO] Loaded engine. Inputs: " << mEngine->getInputDims().size()
-              << " Outputs: " << mEngine->getOutputDims().size() << std::endl;
-
-    auto inDims = mEngine->getInputDims();
-    for (size_t i = 0; i < inDims.size(); ++i)
-    {
-        std::cout << "[YOLO] Input " << i << ": [";
-        for (int d = 0; d < inDims[i].nbDims; ++d)
-            std::cout << inDims[i].d[d] << (d < inDims[i].nbDims - 1 ? ", " : "");
-        std::cout << "]\n";
-    }
-
-    auto outDims = mEngine->getOutputDims();
-    for (size_t i = 0; i < outDims.size(); ++i)
-    {
-        std::cout << "[YOLO] Output " << i << ": [";
-        for (int d = 0; d < outDims[i].nbDims; ++d)
-            std::cout << outDims[i].d[d] << (d < outDims[i].nbDims - 1 ? ", " : "");
-        std::cout << "]\n";
-    }
 }
 
 std::vector<std::vector<cv::cuda::GpuMat>> YOLOv8::preprocess(const cv::cuda::GpuMat &gpuImg)
@@ -120,11 +98,6 @@ std::vector<std::vector<cv::cuda::GpuMat>> YOLOv8::preprocess(const cv::cuda::Gp
     mInputImgWidth = rgbMat.cols;
     mAspectScaleFactor = 1.f / std::min(inputDims[0].d[2] / static_cast<float>(rgbMat.cols), inputDims[0].d[1] / static_cast<float>(rgbMat.rows));
 
-    // DEBUG PRINT
-    std::cout << "[YOLO] Preprocessing: input shape: (" << gpuImg.rows << ", " << gpuImg.cols << ")\n";
-    std::cout << "[YOLO] Model expects: (" << inputDims[0].d[1] << ", " << inputDims[0].d[2] << ")\n";
-    std::cout << "[YOLO] After resize: (" << resized.rows << ", " << resized.cols << ")\n";
-
     return inputs;
 }
 
@@ -152,11 +125,6 @@ std::vector<Object> YOLOv8::detectObjects(const cv::cuda::GpuMat &inputImageBGR)
         throw std::runtime_error("Error: Unable to run inference.");
     }
 
-    // DEBUG PRINT
-    std::cout << "[YOLO] Inference complete. featureVectors.size()=" << featureVectors.size()
-              << " featureVectors[0].size()=" << featureVectors[0].size() << " featureVectors[0][0].size()=" << featureVectors[0][0].size()
-              << std::endl;
-
 #ifdef ENABLE_BENCHMARKS
     static long long t2 = 0;
     t2 += s2.elapsedTime<long long, std::chrono::microseconds>();
@@ -172,12 +140,6 @@ std::vector<Object> YOLOv8::detectObjects(const cv::cuda::GpuMat &inputImageBGR)
         // Since we have a batch size of 1 and only 1 output, we must convert the output from a 3D array to a 1D array.
         std::vector<float> featureVector;
         transformOutput(featureVectors, featureVector);
-
-        // DEBUG PRINT
-        std::cout << "[YOLO] Raw output preview: ";
-        for (int i = 0; i < 10; ++i)
-            std::cout << featureVector[i] << " ";
-        std::cout << std::endl;
 
         const auto &outputDims = mEngine->getOutputDims();
         int numChannels = outputDims[outputDims.size() - 1].d[1];
@@ -437,24 +399,9 @@ std::vector<Object> YOLOv8::postprocessPose(std::vector<float> &featureVector)
 std::vector<Object> YOLOv8::postprocessDetect(std::vector<float> &featureVector)
 {
     const auto &outputDims = mEngine->getOutputDims();
-    std::cout << "[OutputDims] Number of outputs: " << outputDims.size() << std::endl;
 
-    for (size_t i = 0; i < outputDims.size(); ++i)
-    {
-        const auto &dims = outputDims[i];
-        std::cout << "[OutputDims][" << i << "] nbDims = " << dims.nbDims << " [";
-        for (int j = 0; j < dims.nbDims; ++j)
-        {
-            std::cout << dims.d[j];
-            if (j < dims.nbDims - 1)
-                std::cout << ", ";
-        }
-        std::cout << "]" << std::endl;
-    }
     auto numChannels = outputDims[0].d[1];
     auto numAnchors = outputDims[0].d[2];
-    std::cout << "numChannels = " << numChannels << " numAnchors = " << numAnchors << std::endl;
-
     auto numClasses = mClassNames.size();
 
     std::vector<cv::Rect> bboxes;
@@ -464,13 +411,6 @@ std::vector<Object> YOLOv8::postprocessDetect(std::vector<float> &featureVector)
 
     cv::Mat output = cv::Mat(numChannels, numAnchors, CV_32F, featureVector.data());
     output = output.t();
-
-    // DEBUG PRINT
-    std::cout << "[YOLO] Output mat shape: " << output.rows << " x " << output.cols << std::endl;
-    std::cout << "[YOLO] First 10 objectness: ";
-    for (int i = 0; i < 10; ++i)
-        std::cout << output.at<float>(i, 4) << " ";
-    std::cout << std::endl;
 
     // Get all the YOLO proposals
     for (int i = 0; i < numAnchors; i++)
@@ -507,10 +447,6 @@ std::vector<Object> YOLOv8::postprocessDetect(std::vector<float> &featureVector)
 
     // Run NMS
     cv::dnn::NMSBoxesBatched(bboxes, scores, labels, mDetectionThreshold, mNMSThreshold, indices);
-
-    // DEBUG PRINT
-    std::cout << "[YOLO] Number of proposals above threshold: " << bboxes.size() << std::endl;
-    std::cout << "[YOLO] Number of detections after NMS: " << indices.size() << std::endl;
 
     std::vector<Object> objects;
 

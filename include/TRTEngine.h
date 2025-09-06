@@ -60,10 +60,6 @@ template <typename T>
 class TRTEngine : public IEngine<T>
 {
 public:
-    TRTEngine(const std::string &engineFilename);
-    TRTEngine();
-    ~TRTEngine();
-
     // Precision to build TRT engine with for GPU inference
     enum class Precision
     {
@@ -77,8 +73,8 @@ public:
         INT8,
     };
 
-    // Options for building a TRT engine
-    struct Options
+    // BuildOptions for building a TRT engine
+    struct BuildOptions
     {
         // Precision to use for GPU inference.
         Precision precision = Precision::FP16;
@@ -105,13 +101,17 @@ public:
         int32_t optInputWidth = -1; // Default to -1 --> expecting fixed input size
     };
 
+    TRTEngine(const std::string &engineFilename);
+    TRTEngine();
+    ~TRTEngine();
+
     void printEngineInfo(void) const;
     const std::vector<std::string> &getInputNames() const override { return mInputNames; };
     const std::vector<std::string> &getOutputNames() const override { return mOutputNames; };
     const std::vector<nvinfer1::Dims> &getInputDims() const override { return mInputDims; };
     const std::vector<nvinfer1::Dims> &getOutputDims() const override { return mOutputDims; };
-    const std::vector<nvinfer1::TensorFormat> &getInputTensorFormat() const override { return mInputTensorFormats; };
-    const std::vector<nvinfer1::TensorFormat> &getOutputTensorFormat() const override { return mOutputTensorFormats; };
+    const std::vector<nvinfer1::TensorFormat> &getInputTensorFormats() const override { return mInputTensorFormats; };
+    const std::vector<nvinfer1::TensorFormat> &getOutputTensorFormats() const override { return mOutputTensorFormats; };
     const std::vector<nvinfer1::DataType> &getInputDataType() const override { return mInputDataTypes; };
     const std::vector<nvinfer1::DataType> &getOutputDataType() const override { return mOutputDataTypes; };
 
@@ -151,23 +151,23 @@ public:
 
 private:
     void getEngineInfo(void);
-    bool build(std::string onnxModelPath,
-               const std::array<float, 3> &subVals,
-               const std::array<float, 3> &divVals,
-               bool normalize);
+    bool build(
+        std::string onnxModelPath,
+        const std::array<float, 3> &subVals,
+        const std::array<float, 3> &divVals,
+        bool normalize);
     // Convert NHWC to NCHW and apply scaling and mean subtraction
-    static cv::cuda::GpuMat blobFromGpuMats(const std::vector<cv::cuda::GpuMat> &batchInput,
-                                            const std::array<float, 3> &subVals,
-                                            const std::array<float, 3> &divVals,
-                                            bool normalize,
-                                            bool swapRB = false);
-    void transformOutput(std::vector<std::vector<std::vector<T>>> &input, std::vector<std::vector<T>> &output);
-    void transformOutput(std::vector<std::vector<std::vector<T>>> &input, std::vector<T> &output);
+    static cv::cuda::GpuMat blobFromGpuMats(
+        const std::vector<cv::cuda::GpuMat> &batchInput,
+        const std::array<float, 3> &subVals,
+        const std::array<float, 3> &divVals,
+        bool normalize,
+        bool swapRB = false);
     void getDeviceNames(std::vector<std::string> &deviceNames);
     void clearGpuBuffers();
 
     // Members
-    Options mOptions;
+    BuildOptions mOptions;
     std::array<float, 3> mSubVals{};
     std::array<float, 3> mDivVals{};
     bool mNormalize = true;

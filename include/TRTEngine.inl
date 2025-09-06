@@ -123,13 +123,17 @@ TRTEngine<T>::~TRTEngine(void) {}
 template <typename T>
 void TRTEngine<T>::getEngineInfo(void)
 {
+    // Total number of input/output tensors
     int32_t numTensors = mEngine->getNbIOTensors();
 
     // Search all input and output tensors for names, shapes, types, etc
     for (int tensor = 0; tensor < numTensors; ++tensor)
     {
+        // Get tensor name (could be an input or output)
         char const *tensorName = mEngine->getIOTensorName(tensor);
         mIOTensorNames.emplace_back(tensorName);
+
+        // Get tensor type (input or output) and other info
         const nvinfer1::TensorIOMode tensorType = mEngine->getTensorIOMode(tensorName);
         const nvinfer1::Dims tensorShape = mEngine->getTensorShape(tensorName);
         const nvinfer1::DataType tensorDataType = mEngine->getTensorDataType(tensorName);
@@ -141,26 +145,22 @@ void TRTEngine<T>::getEngineInfo(void)
             // The implementation currently only supports inputs of type float
             if (mEngine->getTensorDataType(tensorName) != nvinfer1::DataType::kFLOAT)
             {
-                std::cerr << "Error, the implementation currently only supports float inputs" << std::endl;
-                // spdlog::error(msg);
+                std::string errMsg = "Error, the implementation currently only supports FP32 inputs";
+                spdlog::error(errMsg);
+                throw std::runtime_error(errMsg);
             }
 
             // Don't need to allocate memory for inputs as we will be using the OpenCV
-            // GpuMat buffer directly.
+            // GpuMat buffer directly - could be something done in the future
 
-            // Populate the member variables of the class with engine information
+            // Populate engine info
             nvinfer1::Dims3 inputDims(tensorShape.d[1], tensorShape.d[2], tensorShape.d[3]);
             mInputDims.emplace_back(inputDims);
             mInputNames.emplace_back(tensorName);
             mInputTensorFormats.emplace_back(mEngine->getTensorFormat(tensorName));
             mInputDataTypes.emplace_back(mEngine->getTensorDataType(tensorName));
+            // first dim is typically batch size.  Is -1 for dynamic batches
             mInputBatchSize = tensorShape.d[0];
-            /* only works for tensors that are shape bindings - dynamic shapes
-            int32_t const *inputProfileMaxSize = mEngine->getProfileTensorValues(
-                tensorName,
-                mOptProfileIndex, // profile index: 0 if you only have one
-                nvinfer1::OptProfileSelector::kMAX);*/
-            std::cout << "TensorShape[d[0]]: " << tensorShape.d[0] << std::endl;
             mMaxBatchSize = std::max((int32_t)tensorShape.d[0], mMaxBatchSize);
         }
         else if (tensorType == nvinfer1::TensorIOMode::kOUTPUT)
@@ -212,34 +212,23 @@ void TRTEngine<T>::getEngineInfo(void)
                 throw std::runtime_error(msg);
             }
 
-            // The binding is an output
+            // Calculate the length of the output to allocate for the output
+            // Output memory reserved for output buffer will be the outputLength * sizeof(dataType)
             uint32_t outputLength = 1;
-            mOutputDims.push_back(tensorShape);
 
             for (int j = 1; j < tensorShape.nbDims; ++j)
             {
-                // This will be the size of memory in bytes
-                // We ignore j = 0 because that is the batch size, and we will take that
+                // Ignore j = 0 because that is the batch size, and we will take that
                 // into account when sizing the buffer
                 outputLength *= tensorShape.d[j];
             }
 
-            if (tensorShape.d[0] == 1)
-            {
-                outputLength = outputLength / tensorShape.d[0];
-            }
-
-            // Populate the member variables of the class with engine information
+            // Populate engine info
+            mOutputDims.push_back(tensorShape);
             mOutputLengths.push_back(outputLength);
             mOutputNames.emplace_back(tensorName);
             mOutputTensorFormats.emplace_back(mEngine->getTensorFormat(tensorName));
             mOutputDataTypes.emplace_back(mEngine->getTensorDataType(tensorName));
-            // Now size the output buffer appropriately, taking into account the max
-            // possible batch size (although we could actually end up using less
-            // memory)
-            // TODO - could keep as a max memory size limit? probably delete though
-            // was used for allocating the output memory before inference - move the logic?
-            // checkCudaErrorCode(cudaMallocAsync(&mBuffers[tensor], outputLength * mMaxBatchSize * sizeof(T), stream));
         }
         else
         {
@@ -253,99 +242,94 @@ void TRTEngine<T>::getEngineInfo(void)
 template <typename T>
 void TRTEngine<T>::printEngineInfo() const
 {
-    std::cout << "=== Engine Information ===" << std::endl;
+    std::ostringstream oss;
+    oss << "\n=== Engine Information ===\n";
 
-    // Print input/output tensor names
-    const std::vector<std::string> inputNames = this->getInputNames();
-    const std::vector<std::string> outputNames = this->getOutputNames();
-
-    std::cout << "\nInput tensors (" << inputNames.size() << "):" << std::endl;
+    // Input tensor names
+    const auto inputNames = getInputNames();
+    oss << "\nInput tensors (" << inputNames.size() << "):\n";
     for (size_t i = 0; i < inputNames.size(); ++i)
     {
-        std::cout << "  [" << i << "] " << inputNames[i] << std::endl;
+
+        oss << "  [" << i << "] " << inputNames[i] << "\n";
     }
 
-    std::cout << "\nOutput tensors (" << outputNames.size() << "):" << std::endl;
+    // Output tensor names
+    const auto outputNames = getOutputNames();
+    oss << "\nOutput tensors (" << outputNames.size() << "):\n";
     for (size_t i = 0; i < outputNames.size(); ++i)
     {
-        std::cout << "  [" << i << "] " << outputNames[i] << std::endl;
+        oss << "  [" << i << "] " << outputNames[i] << "\n";
     }
 
-    // Print input/output tensor dimensions
-    const std::vector<nvinfer1::Dims> inputDims = getInputDims();
-    const std::vector<nvinfer1::Dims> outputDims = getOutputDims();
-
-    std::cout << "\nInput dimensions:" << std::endl;
-
+    // Input dims
+    const auto inputDims = getInputDims();
+    oss << "\nInput dimensions:\n";
     for (size_t i = 0; i < inputDims.size(); ++i)
     {
-        std::cout << "  [" << i << "] [";
+        oss << "  [" << i << "] [";
         for (int j = 0; j < inputDims[i].nbDims; ++j)
         {
             if (j > 0)
-                std::cout << ", ";
-            std::cout << inputDims[i].d[j];
+                oss << ", ";
+            oss << inputDims[i].d[j];
         }
-        std::cout << "]" << std::endl;
+        oss << "]\n";
     }
 
-    std::cout << "\nOutput dimensions:" << std::endl;
-
+    // Output dims
+    const auto outputDims = getOutputDims();
+    oss << "\nOutput dimensions:\n";
     for (size_t i = 0; i < outputDims.size(); ++i)
     {
-        std::cout << "  [" << i << "] [";
+        oss << "  [" << i << "] [";
         for (int j = 0; j < outputDims[i].nbDims; ++j)
         {
             if (j > 0)
-                std::cout << ", ";
-            std::cout << outputDims[i].d[j];
+                oss << ", ";
+            oss << outputDims[i].d[j];
         }
-        std::cout << "]" << std::endl;
+        oss << "]\n";
     }
 
-    // Print input/output tensor data types
-    const std::vector<nvinfer1::DataType> inputDataTypes = getInputDataType();
-    const std::vector<nvinfer1::DataType> outputDataTypes = getInputDataType();
-
-    std::cout << "\nData Types:" << std::endl;
-
+    // Data types
+    const auto inputDataTypes = getInputDataType();
+    const auto outputDataTypes = getOutputDataType();
+    oss << "\nData Types:\n";
     for (size_t i = 0; i < inputNames.size(); ++i)
     {
-        std::cout << "  Input " << i << " (" << inputNames[i] << "): "
-                  << getDataTypeString(inputDataTypes[i]) << std::endl;
+        oss << "  Input " << i << " (" << inputNames[i] << "): "
+            << getDataTypeString(inputDataTypes[i]) << "\n";
     }
-
     for (size_t i = 0; i < outputNames.size(); ++i)
     {
-        std::cout << "  Output " << i << " (" << outputNames[i] << "): "
-                  << getDataTypeString(outputDataTypes[i]) << std::endl;
+        oss << "  Output " << i << " (" << outputNames[i] << "): "
+            << getDataTypeString(outputDataTypes[i]) << "\n";
     }
 
-    // Print input/output tensor formats
-
-    const std::vector<nvinfer1::TensorFormat> inputTensorFormats = getInputTensorFormat();
-    const std::vector<nvinfer1::TensorFormat> outputTensorFormats = getOutputTensorFormat();
-
-    std::cout << "\nTensor Formats:" << std::endl;
-
+    // Tensor formats
+    const auto inputTensorFormats = getInputTensorFormats();
+    const auto outputTensorFormats = getOutputTensorFormats();
+    oss << "\nTensor Formats:\n";
     for (size_t i = 0; i < inputTensorFormats.size(); ++i)
     {
-        std::cout << "  Input " << "[" << i << "]: " << cnvrtTensorFormatToString(inputTensorFormats[i])
-                  << std::endl;
+        oss << "  Input [" << i << "]: "
+            << cnvrtTensorFormatToString(inputTensorFormats[i]) << "\n";
     }
-
     for (size_t i = 0; i < outputTensorFormats.size(); ++i)
     {
-        std::cout << "  Output " << "[" << i << "]: " << cnvrtTensorFormatToString(outputTensorFormats[i])
-                  << std::endl;
+        oss << "  Output [" << i << "]: "
+            << cnvrtTensorFormatToString(outputTensorFormats[i]) << "\n";
     }
 
-    // Print basic engine info
-    std::cout << "\nEngine Properties:" << std::endl;
-    std::cout << "  Number of layers: " << mEngine->getNbLayers() << std::endl;
-    std::cout << "  Number of I/O tensors: " << mEngine->getNbIOTensors() << std::endl;
+    // Engine properties
+    oss << "\nEngine Properties:\n";
+    oss << "  Number of layers: " << mEngine->getNbLayers() << "\n";
+    oss << "  Number of I/O tensors: " << mEngine->getNbIOTensors() << "\n";
+    oss << "=========================\n";
 
-    std::cout << "=========================" << std::endl;
+    // Print the entire summary as a single log entry
+    spdlog::info(oss.str());
 }
 
 template <typename T>
@@ -439,13 +423,6 @@ bool TRTEngine<T>::loadNetwork(const std::string &trtModelPath,
     {
         if (mTensorTypes[i] == nvinfer1::TensorIOMode::kOUTPUT)
         {
-            std::cout << "[DEBUG] Allocating OUTPUT buffer " << i
-                      << " size: " << mOutputLengths[outputIndex] << " * " << mMaxBatchSize
-                      << " * " << sizeof(T) << " = " << (mOutputLengths[outputIndex] * mMaxBatchSize * sizeof(T)) << " bytes\n";
-            for (int j = 0; j < mOutputLengths.size(); ++j)
-            {
-                std::cout << "mOutputLengths " << mOutputLengths[outputIndex] << " " << std::endl;
-            }
             // Now size the output buffer appropriately, taking into account the max
             // possible batch size (although we could actually end up using less
             // memory)
