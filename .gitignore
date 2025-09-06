@@ -1,2 +1,8 @@
 build
 *.engine
+*temp
+*tmp
+*.onnx
+*.engine*
+*.mp4
+*.vscode
