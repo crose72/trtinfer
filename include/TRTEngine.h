@@ -115,13 +115,17 @@ private:
         const std::array<float, 3> &divVals,
         bool normalize);
     // Convert NHWC to NCHW and apply scaling and mean subtraction
-    static cv::cuda::GpuMat blobFromGpuMats(
+    cv::cuda::GpuMat blobFromGpuMats(
         const std::vector<cv::cuda::GpuMat> &batchInput,
         const std::array<float, 3> &subVals,
         const std::array<float, 3> &divVals,
         bool normalize,
         bool swapRB = false);
     void getDeviceNames(std::vector<std::string> &deviceNames);
+    void packBatchToBuffer(
+        const std::vector<cv::cuda::GpuMat> &batchImgs, // [N images], each HxWx3 float32 (or 8U if you convert)
+        float *batchBuffer,                             // Device ptr, cudaMalloc-ed, size = N*3*H*W floats
+        int H, int W);
     void clearGpuBuffers();
 
     // Members
