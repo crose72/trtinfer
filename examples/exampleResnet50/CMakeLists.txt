@@ -1,17 +1,21 @@
-set(CMAKE_BUILD_TYPE Debug)                 # or pass -DCMAKE_BUILD_TYPE=Debug
+file(GLOB RESNET_EXAMPLE_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp")
+file(GLOB RESNET_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../ResNet50/*.cpp")
 
-add_executable(exampleResnet50_v2 exampleResnet50_v2.cpp ResNet50.cpp)
+add_definitions(-DENABLE_BENCHMARKS)
 
-target_compile_options(exampleResnet50_v2 PRIVATE -g3 -O0 -fno-omit-frame-pointer)
+add_executable(exampleResNet50 ${RESNET_EXAMPLE_SOURCES} ${RESNET_SOURCES})
 
-target_include_directories(exampleResnet50_v2 PRIVATE
+target_compile_options(exampleResNet50 PRIVATE -g3 -O0 -fno-omit-frame-pointer)
+
+target_include_directories(exampleResNet50 PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../ResNet50
     ${OpenCV_INCLUDE_DIRS}
     ${TensorRT_INCLUDE_DIRS}
     /usr/local/cuda/include
     )
 
-target_link_libraries(exampleResnet50_v2
+target_link_libraries(exampleResNet50
     ${OpenCV_LIBS}
     cudart
     nvinfer

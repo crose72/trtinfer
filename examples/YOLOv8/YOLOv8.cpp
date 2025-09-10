@@ -85,7 +85,7 @@ std::vector<Object> YOLOv8::detectObjects(const cv::cuda::GpuMat &inputImageBGR)
 #ifdef ENABLE_BENCHMARKS
     static long long t1 = 0;
     t1 += s1.elapsedTime<long long, std::chrono::microseconds>();
-    spdlog::info("Avg Preprocess time: {:.3f} ms", (t1 / numIts) / 1000.f);
+    std::cout << "Avg Preprocess time: " << (t1 / numIts) / 1000.f << " ms" << std::endl;
 #endif
     // Run inference using the TensorRT engine
 #ifdef ENABLE_BENCHMARKS
@@ -101,7 +101,7 @@ std::vector<Object> YOLOv8::detectObjects(const cv::cuda::GpuMat &inputImageBGR)
 #ifdef ENABLE_BENCHMARKS
     static long long t2 = 0;
     t2 += s2.elapsedTime<long long, std::chrono::microseconds>();
-    spdlog::info("Avg Inference time: {:.3f} ms", (t2 / numIts) / 1000.f);
+    std::cout << "Avg Inference time: " << (t2 / numIts) / 1000.f << " ms" << std::endl;
     preciseStopwatch s3;
 #endif
     // Check if our model does only object detection or also supports segmentation
@@ -140,7 +140,8 @@ std::vector<Object> YOLOv8::detectObjects(const cv::cuda::GpuMat &inputImageBGR)
 #ifdef ENABLE_BENCHMARKS
     static long long t3 = 0;
     t3 += s3.elapsedTime<long long, std::chrono::microseconds>();
-    spdlog::info("Avg Postprocess time: {:.3f} ms", (t3 / numIts++) / 1000.f);
+    std::cout << "Avg Postprocess time: " << (t3 / numIts++) / 1000.f << " ms\n"
+              << std::endl;
 #endif
     return ret;
 }
