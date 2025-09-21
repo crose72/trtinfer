@@ -121,6 +121,7 @@ private:
         const std::array<float, 3> &divVals,
         bool normalize,
         bool swapRB = false);
+    static cv::cuda::GpuMat packBatchToNCHW(const std::vector<cv::cuda::GpuMat> &batch, int H, int W);
     void getDeviceNames(std::vector<std::string> &deviceNames);
     void clearGpuBuffers();
 

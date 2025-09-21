@@ -62,6 +62,8 @@ public:
     // Run inference: input is CPU or GPU Mat (single image)
     std::vector<Object> detectObjects(const cv::Mat &inputImageBGR);
     std::vector<Object> detectObjects(const cv::cuda::GpuMat &inputImageBGR);
+    std::vector<std::vector<Object>> detectObjects(const std::vector<cv::Mat> &batchImgs);
+    std::vector<std::vector<Object>> detectObjects(const std::vector<cv::cuda::GpuMat> &batchImgs);
     void drawObjectLabels(cv::Mat &image, const std::vector<Object> &objects, unsigned int scale = 2);
     void printEngineInfo(void) { mEngine->printEngineInfo(); };
     void init(void) { mEngine->loadNetwork(
@@ -70,9 +72,12 @@ public:
         mStd,
         mNormalize); };
 
-private:
-    // Preprocess the input
+    // Overloaded function for single input preprocessing
     std::vector<std::vector<cv::cuda::GpuMat>> preprocess(const cv::cuda::GpuMat &gpuImg);
+    // Overloaded function for batch input preprocessing
+    std::vector<std::vector<cv::cuda::GpuMat>> preprocess(const std::vector<cv::cuda::GpuMat> &gpuImgs);
+
+private:
     // Postprocess the output
     std::vector<Object> postprocessDetect(std::vector<float> &featureVector);
     // Postprocess the output for pose model
@@ -90,6 +95,11 @@ private:
     float mInputImgHeight = 0.0;
     float mInputImgWidth = 0.0;
     float mAspectScaleFactor = 1.0;
+
+    // batch input info
+    std::vector<int> mInputImgHeights;
+    std::vector<int> mInputImgWidths;
+    std::vector<float> mAspectScaleFactors;
 
     // detection params
     // Probability threshold used to filter detected objects

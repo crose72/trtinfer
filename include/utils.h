@@ -15,6 +15,29 @@
 #include <opencv2/cudaimgproc.hpp>
 #include <opencv2/cudawarping.hpp>
 
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+    void launch_pack_nchw_kernel(
+        const float *const *imgs, float *batch_blob,
+        int N, int C, int H, int W,
+        int threadsPerBlock);
+
+    void launch_preprocess_and_pack_nchw_kernel(
+        const float *const *imgs, float *batch_blob,
+        int N, int C, int H, int W,
+        int img_stride, // <-- Add stride as param!
+        float mean0, float mean1, float mean2,
+        float std0, float std1, float std2,
+        float norm_factor,
+        int threadsPerBlock);
+
+#ifdef __cplusplus
+}
+#endif
+
 inline void checkCudaErrorCode(cudaError_t code);
 inline std::string tensorDataTypeStr(nvinfer1::DataType dataType);
 inline std::string tensorFormatStr(nvinfer1::TensorFormat format);
@@ -26,7 +49,7 @@ inline cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(
     size_t height,
     size_t width,
     const cv::Scalar &bgcolor = cv::Scalar(0, 0, 0));
-inline void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output);
+inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output);
 inline void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<float> &output);
 inline void transformOutput(std::vector<std::vector<std::vector<__half>>> &input, std::vector<std::vector<float>> &output);
 inline void transformOutput(std::vector<std::vector<std::vector<__half>>> &input, std::vector<float> &output);
@@ -159,12 +182,19 @@ inline cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(
     size_t height, size_t width,
     const cv::Scalar &bgcolor)
 {
+    // Compute resize ratio
     float r = std::min(width / (input.cols * 1.0), height / (input.rows * 1.0));
     int unpad_w = r * input.cols;
     int unpad_h = r * input.rows;
+
+    // Resize the input image with aspect ratio preserved
     cv::cuda::GpuMat re(unpad_h, unpad_w, CV_8UC3);
     cv::cuda::resize(input, re, re.size());
+
+    // Create an output image filled with bg color
     cv::cuda::GpuMat out(height, width, CV_8UC3, bgcolor);
+
+    // Copy resized image to top-left corner of output
     re.copyTo(out(cv::Rect(0, 0, re.cols, re.rows)));
     return out;
 }
@@ -192,16 +222,14 @@ inline void transformOutput(std::vector<std::vector<std::vector<float>>> &input,
  * @param output Output vector (2D, flattened batch).
  * @throws std::logic_error if input batch size is not 1.
  */
-inline void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output)
+inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output)
 {
-    if (input.size() != 1)
+    output.clear();
+    for (const auto &batch_elem : input)
     {
-        auto msg = "The feature vector has incorrect dimensions!";
-        spdlog::error(msg);
-        throw std::logic_error(msg);
+        for (const auto &vec : batch_elem)
+            output.push_back(vec);
     }
-
-    output = std::move(input[0]);
 }
 
 /**

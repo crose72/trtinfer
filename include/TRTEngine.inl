@@ -161,6 +161,14 @@ bool TRTEngine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>>
     std::vector<cv::cuda::GpuMat> preprocessedInputs;
     const int32_t numInputs = mInputDims.size();
 
+    for (int n = 0; n < inputs[0].size(); ++n)
+    {
+        std::cout << "batch[" << n << "]: rows=" << inputs[0][n].rows
+                  << ", cols=" << inputs[0][n].cols
+                  << ", channels=" << inputs[0][n].channels()
+                  << ", type=" << inputs[0][n].type() << std::endl;
+    }
+
     // Preprocess all the input tensors
     for (size_t i = 0; i < mInputDims.size(); ++i)
     {
@@ -172,8 +180,27 @@ bool TRTEngine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>>
         // https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html#data-layout
         // Copy over the input data and perform the preprocessing
         auto mfloat = blobFromGpuMats(batchInput, mSubVals, mDivVals, mNormalize);
+        // auto mfloat = packBatchToNCHW(batchInput, 640, 640);
         preprocessedInputs.push_back(mfloat);
         mBuffers[i] = mfloat.ptr<void>();
+    }
+
+    for (size_t i = 0; i < mInputNames.size(); ++i)
+    {
+        nvinfer1::Dims dims = mInputDims[i]; // e.g. dims.nbDims == 4 for [N,3,640,640]
+        dims.d[0] = inputs[i].size();        // set N = batch size (for input i)
+
+        // Print for debugging:
+        std::cout << "Setting input[" << i << "] shape to nbDims=" << dims.nbDims << " (";
+        for (int d = 0; d < dims.nbDims; ++d)
+            std::cout << dims.d[d] << (d < dims.nbDims - 1 ? ", " : "");
+        std::cout << ")\n";
+
+        bool success = mContext->setInputShape(mInputNames[i].c_str(), dims);
+        if (!success)
+        {
+            throw std::runtime_error("Failed to set input shape for " + std::string(mInputNames[i]));
+        }
     }
 
     // Ensure all dynamic bindings have been defined.
@@ -248,6 +275,64 @@ void TRTEngine<T>::clearGpuBuffers()
         }
         mBuffers.clear();
     }
+}
+/*
+template <typename T>
+cv::cuda::GpuMat TRTEngine<T>::packBatchToNCHW(const std::vector<cv::cuda::GpuMat> &batchInput, int H, int W)
+{
+    int N = batchInput.size();
+    int C = 3;
+    cv::cuda::GpuMat blob(N * C, H * W, CV_32F);
+
+    for (int n = 0; n < N; ++n)
+    {
+        cv::cuda::GpuMat img;
+        batchInput[n].convertTo(img, CV_32FC3, 1.0 / 255.0); // normalize to [0,1]
+        std::vector<cv::cuda::GpuMat> channels;
+        cv::cuda::split(img, channels);
+        for (int c = 0; c < C; ++c)
+        {
+            // blob row index: n*C + c
+            cv::cuda::GpuMat dstRow = blob.row(n * C + c).reshape(1, H, W);
+            channels[c].copyTo(dstRow);
+        }
+    }
+    return blob;
+}*/
+
+template <typename T>
+cv::cuda::GpuMat TRTEngine<T>::packBatchToNCHW(const std::vector<cv::cuda::GpuMat> &batch, int H, int W)
+{
+    int N = batch.size();
+    int C = 3;
+    std::vector<float> cpu_blob(N * C * H * W);
+
+    for (int n = 0; n < N; ++n)
+    {
+        std::cout << "batch[" << n << "]: rows=" << batch[n].rows
+                  << ", cols=" << batch[n].cols
+                  << ", channels=" << batch[n].channels()
+                  << ", type=" << batch[n].type() << std::endl;
+    }
+
+    for (int n = 0; n < N; ++n)
+    {
+        std::vector<cv::Mat> cpu_channels;
+        cv::Mat cpu_img;
+        batch[n].download(cpu_img);       // CUDA->CPU
+        cv::split(cpu_img, cpu_channels); // [R,G,B]
+
+        for (int c = 0; c < C; ++c)
+        {
+            float *dst = &cpu_blob[(n * C + c) * H * W];
+            for (int y = 0; y < H; ++y)
+                for (int x = 0; x < W; ++x)
+                    dst[y * W + x] = cpu_channels[c].at<uchar>(y, x) / 255.0f;
+        }
+    }
+    cv::cuda::GpuMat gpu_blob(N * C * H * W, 1, CV_32F);
+    gpu_blob.upload(cpu_blob);
+    return gpu_blob;
 }
 
 /**
@@ -336,6 +421,7 @@ void TRTEngine<T>::getEngineInfo(void)
         const nvinfer1::Dims tensorShape = mEngine->getTensorShape(tensorName);
         const nvinfer1::DataType tensorDataType = mEngine->getTensorDataType(tensorName);
         mTensorTypes.push_back(tensorType);
+        int profileIndex = 0; // index for looping through optimization profiles - if engine has > 1
 
         // Tensor is an input
         if (tensorType == nvinfer1::TensorIOMode::kINPUT)
@@ -352,14 +438,17 @@ void TRTEngine<T>::getEngineInfo(void)
             // GpuMat buffer directly - could be something done in the future
 
             // Populate engine info
-            nvinfer1::Dims3 inputDims(tensorShape.d[1], tensorShape.d[2], tensorShape.d[3]);
-            mInputDims.emplace_back(inputDims);
+            mInputDims.emplace_back(tensorShape);
             mInputNames.emplace_back(tensorName);
             mInputTensorFormats.emplace_back(mEngine->getTensorFormat(tensorName));
             mInputDataTypes.emplace_back(mEngine->getTensorDataType(tensorName));
             // first dim is typically batch size.  Is -1 for dynamic batches
+            // Getting the max batch size from the optimization profile
+            // TODO: support multiple optimization profiles
+            nvinfer1::Dims maxDims;
+            maxDims = mEngine->getProfileShape(tensorName, profileIndex, nvinfer1::OptProfileSelector::kMAX);
             mInputBatchSize = tensorShape.d[0];
-            mMaxBatchSize = std::max((int32_t)tensorShape.d[0], mMaxBatchSize);
+            mMaxBatchSize = std::max((int32_t)maxDims.d[0], mMaxBatchSize);
         }
         else if (tensorType == nvinfer1::TensorIOMode::kOUTPUT)
         {

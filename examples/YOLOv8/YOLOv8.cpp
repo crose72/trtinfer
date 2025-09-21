@@ -49,7 +49,7 @@ std::vector<std::vector<cv::cuda::GpuMat>> YOLOv8::preprocess(const cv::cuda::Gp
     auto resized = rgbMat;
 
     // Resize to the model expected input size while maintaining the aspect ratio with the use of padding
-    if (resized.rows != inputDims[0].d[1] || resized.cols != inputDims[0].d[2])
+    if (resized.rows != inputDims[0].d[2] || resized.cols != inputDims[0].d[3])
     {
         // Only resize if not already the right size to avoid unecessary copy
         resized = resizeKeepAspectRatioPadRightBottom(rgbMat, inputDims[0].d[1], inputDims[0].d[2]);
@@ -69,6 +69,49 @@ std::vector<std::vector<cv::cuda::GpuMat>> YOLOv8::preprocess(const cv::cuda::Gp
     return inputs;
 }
 
+std::vector<std::vector<cv::cuda::GpuMat>> YOLOv8::preprocess(const std::vector<cv::cuda::GpuMat> &gpuImgs)
+{
+    const auto &inputDims = mEngine->getInputDims();
+    int target_h = inputDims[0].d[2];
+    int target_w = inputDims[0].d[3];
+
+    std::cout << "target h: " << target_h << ", target w :" << target_w << std::endl;
+
+    std::vector<cv::cuda::GpuMat> batchResized;
+
+    mInputImgHeights.clear();
+    mInputImgWidths.clear();
+    mAspectScaleFactors.clear();
+
+    for (const auto &gpuImg : gpuImgs)
+    {
+        // BGR to RGB
+        cv::cuda::GpuMat rgbMat;
+        cv::cuda::cvtColor(gpuImg, rgbMat, cv::COLOR_BGR2RGB);
+
+        std::cout << "before resize: rows=" << gpuImg.rows << ", cols=" << gpuImg.cols << ", channels=" << gpuImg.channels() << ", type=" << gpuImg.type() << std::endl;
+
+        cv::cuda::GpuMat resized = rgbMat;
+        if (rgbMat.rows != target_h || rgbMat.cols != target_w)
+            resized = resizeKeepAspectRatioPadRightBottom(rgbMat, target_h, target_w);
+        std::cout << "resized: rows=" << resized.rows << ", cols=" << resized.cols << ", channels=" << resized.channels() << ", type=" << resized.type() << std::endl;
+        batchResized.push_back(resized);
+
+        mInputImgHeights.push_back(gpuImg.rows);
+        mInputImgWidths.push_back(gpuImg.cols);
+        mAspectScaleFactors.push_back(
+            (float)1.0 / std::min(target_w / static_cast<float>(gpuImg.cols),
+                                  target_h / static_cast<float>(gpuImg.rows)));
+    }
+
+    // For YOLOv8, each element of the outer vector is a model input (only 1 for normal YOLO).
+    // Each inner vector is a batch. So we want [ [img1,img2,...,imgN] ]
+    std::vector<std::vector<cv::cuda::GpuMat>> batchInputs;
+    batchInputs.push_back(std::move(batchResized));
+
+    return batchInputs;
+}
+
 /**
  * @brief Run YOLOv8 inference and return detected objects (CUDA input).
  * @param inputImageBGR Input CUDA image (BGR).
@@ -81,7 +124,24 @@ std::vector<Object> YOLOv8::detectObjects(const cv::cuda::GpuMat &inputImageBGR)
     static int numIts = 1;
     preciseStopwatch s1;
 #endif
+
+    for (int n = 0; n < 1; ++n)
+    {
+        std::cout << "batch[" << n << "]: rows=" << inputImageBGR.rows
+                  << ", cols=" << inputImageBGR.cols
+                  << ", channels=" << inputImageBGR.channels()
+                  << ", type=" << inputImageBGR.type() << std::endl;
+    }
     const auto input = preprocess(inputImageBGR);
+
+    for (int n = 0; n < input[0].size(); ++n)
+    {
+        std::cout << "batch[" << n << "]: rows=" << input[0][n].rows
+                  << ", cols=" << input[0][n].cols
+                  << ", channels=" << input[0][n].channels()
+                  << ", type=" << input[0][n].type() << std::endl;
+    }
+
 #ifdef ENABLE_BENCHMARKS
     static long long t1 = 0;
     t1 += s1.elapsedTime<long long, std::chrono::microseconds>();
@@ -136,6 +196,96 @@ std::vector<Object> YOLOv8::detectObjects(const cv::cuda::GpuMat &inputImageBGR)
         std::vector<std::vector<float>> featureVector;
         transformOutput(featureVectors, featureVector);
         ret = postProcessSegmentation(featureVector);
+    }
+#ifdef ENABLE_BENCHMARKS
+    static long long t3 = 0;
+    t3 += s3.elapsedTime<long long, std::chrono::microseconds>();
+    std::cout << "Avg Postprocess time: " << (t3 / numIts++) / 1000.f << " ms\n"
+              << std::endl;
+#endif
+    return ret;
+}
+
+std::vector<std::vector<Object>> YOLOv8::detectObjects(const std::vector<cv::cuda::GpuMat> &batchImgs)
+{
+    // Preprocess the input image
+#ifdef ENABLE_BENCHMARKS
+    static int numIts = 1;
+    preciseStopwatch s1;
+#endif
+    for (int n = 0; n < batchImgs.size(); ++n)
+    {
+        std::cout << "batch[" << n << "]: rows=" << batchImgs[n].rows
+                  << ", cols=" << batchImgs[n].cols
+                  << ", channels=" << batchImgs[n].channels()
+                  << ", type=" << batchImgs[n].type() << std::endl;
+    }
+    const auto input = preprocess(batchImgs);
+
+    for (int n = 0; n < input[0].size(); ++n)
+    {
+        std::cout << "batch[" << n << "]: rows=" << input[0][n].rows
+                  << ", cols=" << input[0][n].cols
+                  << ", channels=" << input[0][n].channels()
+                  << ", type=" << input[0][n].type() << std::endl;
+    }
+#ifdef ENABLE_BENCHMARKS
+    static long long t1 = 0;
+    t1 += s1.elapsedTime<long long, std::chrono::microseconds>();
+    std::cout << "Avg Preprocess time: " << (t1 / numIts) / 1000.f << " ms" << std::endl;
+#endif
+    // Run inference using the TensorRT engine
+#ifdef ENABLE_BENCHMARKS
+    preciseStopwatch s2;
+#endif
+    std::vector<std::vector<std::vector<float>>> featureVectors;
+    auto succ = mEngine->runInference(input, featureVectors);
+    if (!succ)
+    {
+        throw std::runtime_error("Error: Unable to run inference.");
+    }
+
+#ifdef ENABLE_BENCHMARKS
+    static long long t2 = 0;
+    t2 += s2.elapsedTime<long long, std::chrono::microseconds>();
+    std::cout << "Avg Inference time: " << (t2 / numIts) / 1000.f << " ms" << std::endl;
+    preciseStopwatch s3;
+#endif
+    // Check if our model does only object detection or also supports segmentation
+    std::vector<std::vector<Object>> ret;
+    const auto &numOutputs = mEngine->getOutputDims().size();
+    if (numOutputs == 1)
+    {
+        // Object detection or pose estimation
+        // Since we have a batch size of 1 and only 1 output, we must convert the output from a 3D array to a 1D array.
+        std::vector<std::vector<float>> featureVector;
+        transformOutput(featureVectors, featureVector);
+
+        const auto &outputDims = mEngine->getOutputDims();
+        int numChannels = outputDims[outputDims.size() - 1].d[1];
+        // TODO: Need to improve this to make it more generic (don't use magic number).
+        // For now it works with Ultralytics pretrained models.
+        if (numChannels == 56)
+        {
+            // Pose estimation
+            // ret = postprocessPose(featureVector);
+        }
+        else
+        {
+            // Object detection
+            for (int i = 0; i < featureVector.size(); ++i)
+            {
+                ret.push_back(postprocessDetect(featureVector[i]));
+            }
+        }
+    }
+    else
+    {
+        // Segmentation
+        // Since we have a batch size of 1 and 2 outputs, we must convert the output from a 3D array to a 2D array.
+        std::vector<std::vector<float>> featureVector;
+        // transformOutput(featureVectors, featureVector);
+        // ret = postProcessSegmentation(featureVector);
     }
 #ifdef ENABLE_BENCHMARKS
     static long long t3 = 0;
