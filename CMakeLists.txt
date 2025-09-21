@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(TensorRT_Inference)
+project(TensorRT_Inference LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,7 +13,10 @@ find_package(TensorRT REQUIRED)
 find_package(fmt REQUIRED)
 
 # Source files from src/
-file(GLOB TENSORRT_INFER_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+file(GLOB TENSORRT_INFER_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cu"
+)
 
 # Build the static library
 add_library(trtinfer STATIC ${TENSORRT_INFER_SOURCES})
@@ -32,5 +35,9 @@ target_link_libraries(trtinfer
     fmt::fmt
     )
 
+set_target_properties(trtinfer PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+
 # Build examples
-add_subdirectory(examples)
+if (BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
