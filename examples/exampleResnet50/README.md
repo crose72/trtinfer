@@ -9,6 +9,6 @@ tar xzf resnet50.tar.gz
 ### Convert onnx to TRT engine
 /usr/src/tensorrt/bin/trtexec \
   --onnx=resnet50/model.onnx \
-  --saveEngine=resnet_engine_intro.engine \
+  --saveEngine=resnet50.engine \
   --stronglyTyped \
   --allowWeightStreaming
