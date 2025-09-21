@@ -41,6 +41,4 @@ int main(void)
     cap.release();
     cv::destroyAllWindows();
     return 0;
-
-    return 0;
 }

@@ -144,6 +144,36 @@ bool TRTEngine<T>::loadNetwork(const std::string &trtModelPath,
     return true;
 }
 
+template <typename T>
+inline void TRTEngine<T>::packBatchToBuffer(
+    const std::vector<cv::cuda::GpuMat> &batchImgs, // [N images], each HxWx3 float32 (or 8U if you convert)
+    float *batchBuffer,                             // Device ptr, cudaMalloc-ed, size = N*3*H*W floats
+    int H, int W)
+{
+    int N = batchImgs.size();
+    for (int n = 0; n < N; ++n)
+    {
+        // Assumption: image is CV_32FC3, size HxW
+        std::vector<cv::cuda::GpuMat> channels(3);
+        cv::cuda::split(batchImgs[n], channels); // Each: HxW, float32
+
+        for (int c = 0; c < 3; ++c)
+        {
+            size_t offset = (n * 3 + c) * H * W; // [N,C,H,W]
+            // Copy channel to the correct offset of the batch buffer
+            cudaError_t err = cudaMemcpy(
+                batchBuffer + offset,
+                channels[c].ptr<float>(),
+                H * W * sizeof(float),
+                cudaMemcpyDeviceToDevice);
+            if (err != cudaSuccess)
+            {
+                std::cerr << "cudaMemcpy failed: " << cudaGetErrorString(err) << std::endl;
+            }
+        }
+    }
+}
+
 /**
  * @brief Run inference on a batch of input images.
  * @param inputs         Batched input images for each input tensor (NHWC, on GPU).
@@ -161,13 +191,8 @@ bool TRTEngine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>>
     std::vector<cv::cuda::GpuMat> preprocessedInputs;
     const int32_t numInputs = mInputDims.size();
 
-    for (int n = 0; n < inputs[0].size(); ++n)
-    {
-        std::cout << "batch[" << n << "]: rows=" << inputs[0][n].rows
-                  << ", cols=" << inputs[0][n].cols
-                  << ", channels=" << inputs[0][n].channels()
-                  << ", type=" << inputs[0][n].type() << std::endl;
-    }
+    // Allocate batch buffer on GPU
+    // float *d_batchBuffer = nullptr;
 
     // Preprocess all the input tensors
     for (size_t i = 0; i < mInputDims.size(); ++i)
@@ -179,10 +204,23 @@ bool TRTEngine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>>
         // internally use NHWC to optimize cuda kernels See:
         // https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html#data-layout
         // Copy over the input data and perform the preprocessing
-        auto mfloat = blobFromGpuMats(batchInput, mSubVals, mDivVals, mNormalize);
-        // auto mfloat = packBatchToNCHW(batchInput, 640, 640);
-        preprocessedInputs.push_back(mfloat);
-        mBuffers[i] = mfloat.ptr<void>();
+        // auto mfloat = blobFromGpuMats(batchInput, mSubVals, mDivVals, mNormalize);
+        // preprocessedInputs.push_back(mfloat);
+        // mBuffers[i] = mfloat.ptr<void>();
+
+        // Already filled, each HxWx3, type CV_32FC3
+        // int N = batchInput.size();
+        // int H = batchInput[0].rows;
+        // int W = batchInput[0].cols;
+
+        //(&d_batchBuffer, N * 3 * H * W * sizeof(float));
+        // Fill the buffer
+        // packBatchToBuffer(batchInput, d_batchBuffer, H, W);
+
+        // Assign buffer to TensorRT's input
+        // mBuffers[i] = d_batchBuffer;
+
+        // NOTE: You should cudaFree(d_batchBuffer) after inference completes (and after outputs are copied back!)
     }
 
     for (size_t i = 0; i < mInputNames.size(); ++i)
@@ -256,6 +294,9 @@ bool TRTEngine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>>
     checkCudaErrorCode(cudaStreamSynchronize(inferenceCudaStream));
     checkCudaErrorCode(cudaStreamDestroy(inferenceCudaStream));
 
+    // free up input buffer memory
+    // cudaFree(d_batchBuffer);
+
     return true;
 }
 
@@ -276,64 +317,6 @@ void TRTEngine<T>::clearGpuBuffers()
         mBuffers.clear();
     }
 }
-/*
-template <typename T>
-cv::cuda::GpuMat TRTEngine<T>::packBatchToNCHW(const std::vector<cv::cuda::GpuMat> &batchInput, int H, int W)
-{
-    int N = batchInput.size();
-    int C = 3;
-    cv::cuda::GpuMat blob(N * C, H * W, CV_32F);
-
-    for (int n = 0; n < N; ++n)
-    {
-        cv::cuda::GpuMat img;
-        batchInput[n].convertTo(img, CV_32FC3, 1.0 / 255.0); // normalize to [0,1]
-        std::vector<cv::cuda::GpuMat> channels;
-        cv::cuda::split(img, channels);
-        for (int c = 0; c < C; ++c)
-        {
-            // blob row index: n*C + c
-            cv::cuda::GpuMat dstRow = blob.row(n * C + c).reshape(1, H, W);
-            channels[c].copyTo(dstRow);
-        }
-    }
-    return blob;
-}*/
-
-template <typename T>
-cv::cuda::GpuMat TRTEngine<T>::packBatchToNCHW(const std::vector<cv::cuda::GpuMat> &batch, int H, int W)
-{
-    int N = batch.size();
-    int C = 3;
-    std::vector<float> cpu_blob(N * C * H * W);
-
-    for (int n = 0; n < N; ++n)
-    {
-        std::cout << "batch[" << n << "]: rows=" << batch[n].rows
-                  << ", cols=" << batch[n].cols
-                  << ", channels=" << batch[n].channels()
-                  << ", type=" << batch[n].type() << std::endl;
-    }
-
-    for (int n = 0; n < N; ++n)
-    {
-        std::vector<cv::Mat> cpu_channels;
-        cv::Mat cpu_img;
-        batch[n].download(cpu_img);       // CUDA->CPU
-        cv::split(cpu_img, cpu_channels); // [R,G,B]
-
-        for (int c = 0; c < C; ++c)
-        {
-            float *dst = &cpu_blob[(n * C + c) * H * W];
-            for (int y = 0; y < H; ++y)
-                for (int x = 0; x < W; ++x)
-                    dst[y * W + x] = cpu_channels[c].at<uchar>(y, x) / 255.0f;
-        }
-    }
-    cv::cuda::GpuMat gpu_blob(N * C * H * W, 1, CV_32F);
-    gpu_blob.upload(cpu_blob);
-    return gpu_blob;
-}
 
 /**
  * @brief Convert and preprocess input GPU images to a single input tensor (NCHW, float, mean/std).
@@ -345,11 +328,11 @@ cv::cuda::GpuMat TRTEngine<T>::packBatchToNCHW(const std::vector<cv::cuda::GpuMa
  * @return Preprocessed input as cv::cuda::GpuMat.
  */
 template <typename T>
-cv::cuda::GpuMat TRTEngine<T>::blobFromGpuMats(const std::vector<cv::cuda::GpuMat> &batchInput,
-                                               const std::array<float, 3> &subVals,
-                                               const std::array<float, 3> &divVals,
-                                               bool normalize,
-                                               bool swapRB)
+inline cv::cuda::GpuMat TRTEngine<T>::blobFromGpuMats(const std::vector<cv::cuda::GpuMat> &batchInput,
+                                                      const std::array<float, 3> &subVals,
+                                                      const std::array<float, 3> &divVals,
+                                                      bool normalize,
+                                                      bool swapRB)
 {
 
     CHECK(!batchInput.empty())
