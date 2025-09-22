@@ -244,6 +244,13 @@ std::vector<std::vector<Object>> YOLOv8::detectObjects(const std::vector<cv::cud
     {
         throw std::runtime_error("Error: Unable to run inference.");
     }
+    for (auto &d : mEngine->getOutputDims())
+    {
+        std::cout << "outputDim: nbDims=" << d.nbDims << " ";
+        for (int i = 0; i < d.nbDims; ++i)
+            std::cout << d.d[i] << " ";
+        std::cout << std::endl;
+    }
 
 #ifdef ENABLE_BENCHMARKS
     static long long t2 = 0;
@@ -275,7 +282,7 @@ std::vector<std::vector<Object>> YOLOv8::detectObjects(const std::vector<cv::cud
             // Object detection
             for (int i = 0; i < featureVector.size(); ++i)
             {
-                ret.push_back(postprocessDetect(featureVector[i]));
+                ret.push_back(postprocessDetectBatch(featureVector[i]));
             }
         }
     }
@@ -534,6 +541,79 @@ std::vector<Object> YOLOv8::postprocessPose(std::vector<float> &featureVector)
     return objects;
 }
 
+std::vector<Object> YOLOv8::postprocessDetectBatch(std::vector<float> &featureVector)
+{
+    const auto &outputDims = mEngine->getOutputDims();
+    int numChannels = outputDims[0].d[1]; // 84
+    int numAnchors = outputDims[0].d[2];  // 8400
+    int numClasses = mClassNames.size();  // 80 (COCO)
+
+    std::vector<cv::Rect> bboxes;
+    std::vector<float> scores;
+    std::vector<int> labels;
+    std::vector<int> indices;
+
+    for (int anchor = 0; anchor < numAnchors; ++anchor)
+    {
+        // Fetch bbox
+        float x = featureVector[anchor + 0 * numAnchors];
+        float y = featureVector[anchor + 1 * numAnchors];
+        float w = featureVector[anchor + 2 * numAnchors];
+        float h = featureVector[anchor + 3 * numAnchors];
+
+        // Fetch class scores
+        auto class_start = 4 * numAnchors + anchor;
+        float max_score = -1;
+        int max_label = -1;
+        for (int cls = 0; cls < numClasses; ++cls)
+        {
+            float score = featureVector[class_start + cls * numAnchors];
+            if (score > max_score)
+            {
+                max_score = score;
+                max_label = cls;
+            }
+        }
+
+        if (max_score > mDetectionThreshold)
+        {
+            // Undo normalization/clipping as you do
+            float x0 = std::clamp((x - 0.5f * w) * mAspectScaleFactor, 0.f, mInputImgWidth);
+            float y0 = std::clamp((y - 0.5f * h) * mAspectScaleFactor, 0.f, mInputImgHeight);
+            float x1 = std::clamp((x + 0.5f * w) * mAspectScaleFactor, 0.f, mInputImgWidth);
+            float y1 = std::clamp((y + 0.5f * h) * mAspectScaleFactor, 0.f, mInputImgHeight);
+
+            cv::Rect_<float> bbox;
+            bbox.x = x0;
+            bbox.y = y0;
+            bbox.width = x1 - x0;
+            bbox.height = y1 - y0;
+
+            bboxes.push_back(bbox);
+            labels.push_back(max_label);
+            scores.push_back(max_score);
+        }
+    }
+
+    // NMS and rest is fine...
+    cv::dnn::NMSBoxesBatched(bboxes, scores, labels, mDetectionThreshold, mNMSThreshold, indices);
+    std::vector<Object> objects;
+    int cnt = 0;
+    for (auto &chosenIdx : indices)
+    {
+        if (cnt >= mTopK)
+            break;
+        Object obj{};
+        obj.probability = scores[chosenIdx];
+        obj.label = labels[chosenIdx];
+        obj.rect = bboxes[chosenIdx];
+        objects.push_back(obj);
+        cnt += 1;
+    }
+
+    return objects;
+}
+
 /**
  * @brief Post-process detection output tensors into object vector.
  * @param featureVector Model output tensor.
@@ -541,6 +621,11 @@ std::vector<Object> YOLOv8::postprocessPose(std::vector<float> &featureVector)
  */
 std::vector<Object> YOLOv8::postprocessDetect(std::vector<float> &featureVector)
 {
+    std::cout << "First 16 output values:\n";
+    for (int i = 0; i < 16; ++i)
+        std::cout << featureVector[i] << " ";
+    std::cout << std::endl;
+
     const auto &outputDims = mEngine->getOutputDims();
 
     auto numChannels = outputDims[0].d[1];
@@ -569,6 +654,8 @@ std::vector<Object> YOLOv8::postprocessDetect(std::vector<float> &featureVector)
             float y = *bboxesPtr++;
             float w = *bboxesPtr++;
             float h = *bboxesPtr;
+
+            std::cout << "Predicted: x=" << x << " y=" << y << " w=" << w << " h=" << h << std::endl;
 
             float x0 = std::clamp((x - 0.5f * w) * mAspectScaleFactor, 0.f, mInputImgWidth);
             float y0 = std::clamp((y - 0.5f * h) * mAspectScaleFactor, 0.f, mInputImgHeight);

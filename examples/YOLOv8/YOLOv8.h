@@ -80,6 +80,7 @@ public:
 private:
     // Postprocess the output
     std::vector<Object> postprocessDetect(std::vector<float> &featureVector);
+    std::vector<Object> postprocessDetectBatch(std::vector<float> &featureVector);
     // Postprocess the output for pose model
     std::vector<Object> postprocessPose(std::vector<float> &featureVector);
     // Postprocess the output for segmentation model

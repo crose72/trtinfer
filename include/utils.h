@@ -222,6 +222,7 @@ inline void transformOutput(std::vector<std::vector<std::vector<float>>> &input,
  * @param output Output vector (2D, flattened batch).
  * @throws std::logic_error if input batch size is not 1.
  */
+/*
 inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output)
 {
     output.clear();
@@ -229,6 +230,22 @@ inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &
     {
         for (const auto &vec : batch_elem)
             output.push_back(vec);
+    }
+}*/
+
+inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input,
+                            std::vector<std::vector<float>> &output)
+{
+    output.clear();
+    for (const auto &batch_elem : input) // batch_elem is [C, N]
+    {
+        // Flatten [C, N] into one vector of C*N elements, channel-major order
+        std::vector<float> flat;
+        for (size_t c = 0; c < batch_elem.size(); ++c)
+        {
+            flat.insert(flat.end(), batch_elem[c].begin(), batch_elem[c].end());
+        }
+        output.push_back(std::move(flat));
     }
 }
 

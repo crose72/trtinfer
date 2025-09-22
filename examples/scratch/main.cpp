@@ -7,9 +7,10 @@ void getBatchInputs(void)
 {
     // ---- [1] Define your batch of images ----
     std::vector<std::string> imgPaths = {
-        "/workspace/examples/exampleBatchYOLOv8/elephant.jpg",
-        "/workspace/examples/exampleBatchYOLOv8/squirrel.jpg",
-        "/workspace/examples/exampleBatchYOLOv8/border-collie.jpg"};
+        "/workspace/examples/scratch/elephant.jpg",
+        "/workspace/examples/scratch/squirrel.jpg",
+        "/workspace/examples/scratch/border-collie.jpg",
+        "/workspace/examples/scratch/people.jpg"};
 
     // ---- [2] Load images into cv::Mat ----
     for (const auto &path : imgPaths)
@@ -35,6 +36,8 @@ void getBatchInputs(void)
         gpuImg.upload(img);
         imgs_gpu.push_back(gpuImg);
     }
+
+    std::cout << "Num Images = " << imgs_gpu.size() << std::endl;
 }
 
 cv::cuda::GpuMat blobFromGpuMatsTest(const std::vector<cv::cuda::GpuMat> &batchInput,

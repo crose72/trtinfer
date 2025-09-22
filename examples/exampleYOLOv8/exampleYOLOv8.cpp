@@ -15,7 +15,18 @@ int main(void)
         return -1;
     }
 
-    cv::Mat frame;
+    cv::Mat frame = cv::imread("/workspace/examples/exampleBatchYOLOv8/elephant.jpg");
+
+    // Detect objects in the current frame
+    std::vector<Object> detections = yolo.detectObjects(frame);
+
+    // Draw results
+    yolo.drawObjectLabels(frame, detections);
+
+    // Show the frame
+    cv::imshow("YOLOv8 Detection", frame);
+
+    return 0;
 
     while (true)
     {
