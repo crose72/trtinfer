@@ -7,10 +7,10 @@ void getBatchInputs(void)
 {
     // ---- [1] Define your batch of images ----
     std::vector<std::string> imgPaths = {
-        "/workspace/examples/scratch/elephant.jpg",
-        "/workspace/examples/scratch/squirrel.jpg",
-        "/workspace/examples/scratch/border-collie.jpg",
-        "/workspace/examples/scratch/people.jpg"};
+        "/workspace/trtinfer/examples/scratch/elephant.jpg",
+        "/workspace/trtinfer/examples/scratch/squirrel.jpg",
+        "/workspace/trtinfer/examples/scratch/border-collie.jpg",
+        "/workspace/trtinfer/examples/scratch/people.jpg"};
 
     // ---- [2] Load images into cv::Mat ----
     for (const auto &path : imgPaths)
@@ -427,7 +427,7 @@ void testYOLO_Batch(void)
 {
     // Need to preprocess images with yolo first
     YOLOv8::Config config;
-    YOLOv8 yolo("/workspace/examples/scratch/yolov8s_batch.engine", config);
+    YOLOv8 yolo("/workspace/trtinfer/examples/scratch/yolov8s_batch.engine", config);
 
     getBatchInputs();
 
