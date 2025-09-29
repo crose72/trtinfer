@@ -443,6 +443,7 @@ void testYOLO_Batch(void)
 
         // Show the frame
         cv::imshow("YOLOv8 Detection", cpuImg);
+        cv::waitKey(0);
     }
 
     return;

@@ -80,7 +80,7 @@ public:
 private:
     // Postprocess the output
     std::vector<Object> postprocessDetect(std::vector<float> &featureVector);
-    std::vector<Object> postprocessDetectBatch(std::vector<float> &featureVector);
+    std::vector<Object> postprocessDetectBatch(std::vector<float> &featureVector, int imageInBatch);
     // Postprocess the output for pose model
     std::vector<Object> postprocessPose(std::vector<float> &featureVector);
     // Postprocess the output for segmentation model
@@ -98,8 +98,8 @@ private:
     float mAspectScaleFactor = 1.0;
 
     // batch input info
-    std::vector<int> mInputImgHeights;
-    std::vector<int> mInputImgWidths;
+    std::vector<float> mInputImgHeights;
+    std::vector<float> mInputImgWidths;
     std::vector<float> mAspectScaleFactors;
 
     // detection params

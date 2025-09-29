@@ -282,7 +282,7 @@ std::vector<std::vector<Object>> YOLOv8::detectObjects(const std::vector<cv::cud
             // Object detection
             for (int i = 0; i < featureVector.size(); ++i)
             {
-                ret.push_back(postprocessDetectBatch(featureVector[i]));
+                ret.push_back(postprocessDetectBatch(featureVector[i], i));
             }
         }
     }
@@ -541,7 +541,7 @@ std::vector<Object> YOLOv8::postprocessPose(std::vector<float> &featureVector)
     return objects;
 }
 
-std::vector<Object> YOLOv8::postprocessDetectBatch(std::vector<float> &featureVector)
+std::vector<Object> YOLOv8::postprocessDetectBatch(std::vector<float> &featureVector, int imageInBatch)
 {
     const auto &outputDims = mEngine->getOutputDims();
     int numChannels = outputDims[0].d[1]; // 84
@@ -578,10 +578,10 @@ std::vector<Object> YOLOv8::postprocessDetectBatch(std::vector<float> &featureVe
         if (max_score > mDetectionThreshold)
         {
             // Undo normalization/clipping as you do
-            float x0 = std::clamp((x - 0.5f * w) * mAspectScaleFactor, 0.f, mInputImgWidth);
-            float y0 = std::clamp((y - 0.5f * h) * mAspectScaleFactor, 0.f, mInputImgHeight);
-            float x1 = std::clamp((x + 0.5f * w) * mAspectScaleFactor, 0.f, mInputImgWidth);
-            float y1 = std::clamp((y + 0.5f * h) * mAspectScaleFactor, 0.f, mInputImgHeight);
+            float x0 = std::clamp((x - 0.5f * w) * mAspectScaleFactors[imageInBatch], 0.f, mInputImgWidths[imageInBatch]);
+            float y0 = std::clamp((y - 0.5f * h) * mAspectScaleFactors[imageInBatch], 0.f, mInputImgHeights[imageInBatch]);
+            float x1 = std::clamp((x + 0.5f * w) * mAspectScaleFactors[imageInBatch], 0.f, mInputImgWidths[imageInBatch]);
+            float y1 = std::clamp((y + 0.5f * h) * mAspectScaleFactors[imageInBatch], 0.f, mInputImgHeights[imageInBatch]);
 
             cv::Rect_<float> bbox;
             bbox.x = x0;
