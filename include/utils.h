@@ -44,15 +44,15 @@ inline std::string tensorFormatStr(nvinfer1::TensorFormat format);
 inline bool doesFileExist(const std::string &name);
 inline std::filesystem::path relativePath(const std::filesystem::path &rel);
 inline std::vector<std::string> getFilesInDirectory(const std::string &dirPath);
-inline cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(
+inline cv::cuda::GpuMat letterbox(
     const cv::cuda::GpuMat &input,
     size_t height,
     size_t width,
     const cv::Scalar &bgcolor = cv::Scalar(0, 0, 0));
 inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output);
-inline void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<float> &output);
-inline void transformOutput(std::vector<std::vector<std::vector<__half>>> &input, std::vector<std::vector<float>> &output);
-inline void transformOutput(std::vector<std::vector<std::vector<__half>>> &input, std::vector<float> &output);
+inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input, std::vector<float> &output);
+inline void transformOutput(const std::vector<std::vector<std::vector<__half>>> &input, std::vector<std::vector<float>> &output);
+inline void transformOutput(const std::vector<std::vector<std::vector<__half>>> &input, std::vector<float> &output);
 
 #define CHECK(condition)                                                                                                           \
     do                                                                                                                             \
@@ -177,7 +177,7 @@ inline std::string tensorFormatStr(nvinfer1::TensorFormat format)
  * @param bgcolor Color used for padding (default: black).
  * @return Resized and padded CUDA image (GpuMat).
  */
-inline cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(
+inline cv::cuda::GpuMat letterbox(
     const cv::cuda::GpuMat &input,
     size_t height, size_t width,
     const cv::Scalar &bgcolor)
@@ -203,9 +203,8 @@ inline cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(
  * @brief Flattens a nested 3D feature vector (size 1x1xN) into a 1D output vector.
  * @param input Input feature vector (nested).
  * @param output Output vector (flattened).
- * @throws std::logic_error if input is not 1x1.
  */
-inline void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<float> &output)
+inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input, std::vector<float> &output)
 {
     if (input.size() != 1 || input[0].size() != 1)
     {
@@ -217,22 +216,10 @@ inline void transformOutput(std::vector<std::vector<std::vector<float>>> &input,
 }
 
 /**
- * @brief Flattens a nested 3D feature vector (size 1xNxM) into a 2D output vector.
+ * @brief Flattens a nested 3D feature vector (size BxMxN) into a 1D output vector.
  * @param input Input feature vector (nested).
- * @param output Output vector (2D, flattened batch).
- * @throws std::logic_error if input batch size is not 1.
+ * @param output Output vector (flattened).
  */
-/*
-inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output)
-{
-    output.clear();
-    for (const auto &batch_elem : input)
-    {
-        for (const auto &vec : batch_elem)
-            output.push_back(vec);
-    }
-}*/
-
 inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input,
                             std::vector<std::vector<float>> &output)
 {
@@ -255,7 +242,7 @@ inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &
  * @param output Output vector (flattened).
  * @throws std::logic_error if input is not 1x1.
  */
-inline void transformOutput(std::vector<std::vector<std::vector<__half>>> &input, std::vector<float> &output)
+inline void transformOutput(const std::vector<std::vector<std::vector<__half>>> &input, std::vector<float> &output)
 {
     if (input.size() != 1 || input[0].size() != 1)
         throw std::logic_error("The feature vector has incorrect dimensions!");
@@ -271,7 +258,7 @@ inline void transformOutput(std::vector<std::vector<std::vector<__half>>> &input
  * @param output Output vector (2D, flattened batch).
  * @throws std::logic_error if input batch size is not 1.
  */
-inline void transformOutput(std::vector<std::vector<std::vector<__half>>> &input, std::vector<std::vector<float>> &output)
+inline void transformOutput(const std::vector<std::vector<std::vector<__half>>> &input, std::vector<std::vector<float>> &output)
 {
     if (input.size() != 1)
         throw std::logic_error("The feature vector has incorrect dimensions!");

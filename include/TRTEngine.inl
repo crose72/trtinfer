@@ -161,14 +161,6 @@ bool TRTEngine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>>
     std::vector<cv::cuda::GpuMat> preprocessedInputs;
     const int32_t numInputs = mInputDims.size();
 
-    for (int n = 0; n < inputs[0].size(); ++n)
-    {
-        std::cout << "batch[" << n << "]: rows=" << inputs[0][n].rows
-                  << ", cols=" << inputs[0][n].cols
-                  << ", channels=" << inputs[0][n].channels()
-                  << ", type=" << inputs[0][n].type() << std::endl;
-    }
-
     // Preprocess all the input tensors
     for (size_t i = 0; i < mInputDims.size(); ++i)
     {
@@ -180,7 +172,6 @@ bool TRTEngine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>>
         // https://docs.nvidia.com/deeplearning/tensorrt/developer-guide/index.html#data-layout
         // Copy over the input data and perform the preprocessing
         auto mfloat = blobFromGpuMats(batchInput, mSubVals, mDivVals, mNormalize);
-        // auto mfloat = packBatchToNCHW(batchInput, 640, 640);
         preprocessedInputs.push_back(mfloat);
         mBuffers[i] = mfloat.ptr<void>();
     }
@@ -189,12 +180,6 @@ bool TRTEngine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>>
     {
         nvinfer1::Dims dims = mInputDims[i]; // e.g. dims.nbDims == 4 for [N,3,640,640]
         dims.d[0] = inputs[i].size();        // set N = batch size (for input i)
-
-        // Print for debugging:
-        std::cout << "Setting input[" << i << "] shape to nbDims=" << dims.nbDims << " (";
-        for (int d = 0; d < dims.nbDims; ++d)
-            std::cout << dims.d[d] << (d < dims.nbDims - 1 ? ", " : "");
-        std::cout << ")\n";
 
         bool success = mContext->setInputShape(mInputNames[i].c_str(), dims);
         if (!success)
@@ -276,64 +261,6 @@ void TRTEngine<T>::clearGpuBuffers()
         mBuffers.clear();
     }
 }
-/*
-template <typename T>
-cv::cuda::GpuMat TRTEngine<T>::packBatchToNCHW(const std::vector<cv::cuda::GpuMat> &batchInput, int H, int W)
-{
-    int N = batchInput.size();
-    int C = 3;
-    cv::cuda::GpuMat blob(N * C, H * W, CV_32F);
-
-    for (int n = 0; n < N; ++n)
-    {
-        cv::cuda::GpuMat img;
-        batchInput[n].convertTo(img, CV_32FC3, 1.0 / 255.0); // normalize to [0,1]
-        std::vector<cv::cuda::GpuMat> channels;
-        cv::cuda::split(img, channels);
-        for (int c = 0; c < C; ++c)
-        {
-            // blob row index: n*C + c
-            cv::cuda::GpuMat dstRow = blob.row(n * C + c).reshape(1, H, W);
-            channels[c].copyTo(dstRow);
-        }
-    }
-    return blob;
-}*/
-
-template <typename T>
-cv::cuda::GpuMat TRTEngine<T>::packBatchToNCHW(const std::vector<cv::cuda::GpuMat> &batch, int H, int W)
-{
-    int N = batch.size();
-    int C = 3;
-    std::vector<float> cpu_blob(N * C * H * W);
-
-    for (int n = 0; n < N; ++n)
-    {
-        std::cout << "batch[" << n << "]: rows=" << batch[n].rows
-                  << ", cols=" << batch[n].cols
-                  << ", channels=" << batch[n].channels()
-                  << ", type=" << batch[n].type() << std::endl;
-    }
-
-    for (int n = 0; n < N; ++n)
-    {
-        std::vector<cv::Mat> cpu_channels;
-        cv::Mat cpu_img;
-        batch[n].download(cpu_img);       // CUDA->CPU
-        cv::split(cpu_img, cpu_channels); // [R,G,B]
-
-        for (int c = 0; c < C; ++c)
-        {
-            float *dst = &cpu_blob[(n * C + c) * H * W];
-            for (int y = 0; y < H; ++y)
-                for (int x = 0; x < W; ++x)
-                    dst[y * W + x] = cpu_channels[c].at<uchar>(y, x) / 255.0f;
-        }
-    }
-    cv::cuda::GpuMat gpu_blob(N * C * H * W, 1, CV_32F);
-    gpu_blob.upload(cpu_blob);
-    return gpu_blob;
-}
 
 /**
  * @brief Convert and preprocess input GPU images to a single input tensor (NCHW, float, mean/std).
@@ -351,13 +278,43 @@ cv::cuda::GpuMat TRTEngine<T>::blobFromGpuMats(const std::vector<cv::cuda::GpuMa
                                                bool normalize,
                                                bool swapRB)
 {
-
+    /*
+     * ----------------------------------------
+     * Batch Image Packing for TensorRT Inference
+     * ----------------------------------------
+     *
+     * This function packs a batch of images (each as a cv::cuda::GpuMat, shape HxW, 3 channels)
+     * into a single, flat, contiguous CUDA buffer (GpuMat) suitable for TensorRT NCHW input.
+     *
+     * Memory Layout:
+     *   - The output buffer (gpu_dst) is a single row, with width = H * W * batch_size, 3 channels.
+     *   - For each image in the batch:
+     *       - The R, G, and B channel data are placed contiguously at specific offsets
+     *         (i.e., all R for image 0, all G for image 0, all B for image 0, then repeat for image 1, etc).
+     *   - Each channel of each image is "viewed" as a GpuMat at the correct offset inside the buffer,
+     *     so no extra memory allocation or copying is needed.
+     *
+     * Usage of cv::cuda::split:
+     *   - For each image, we create three GpuMat views (one per channel) at the appropriate offset in the flat buffer.
+     *   - cv::cuda::split splits an input image into R, G, and B channel planes, storing them directly into the preallocated regions.
+     *   - This results in the correct NCHW layout for inference: [R_plane][G_plane][B_plane] for each image, contiguous for the batch.
+     *
+     * Why not just interleaved?
+     *   - OpenCV stores images as interleaved (RGBRGB...), but most deep learning inference engines (like TensorRT)
+     *     expect the data in planar format: [all R][all G][all B], row-major within each channel.
+     *   - This packing function prepares exactly that format, compatible with TensorRT NCHW input.
+     *
+     * Note:
+     *   - The critical part is using GpuMat "views" (with custom data pointers) for each channel at the right offset,
+     *     so the split writes directly into the batch buffer.
+     */
     CHECK(!batchInput.empty())
     CHECK(batchInput[0].channels() == 3)
 
     cv::cuda::GpuMat gpu_dst(1, batchInput[0].rows * batchInput[0].cols * batchInput.size(), CV_8UC3);
 
     size_t width = batchInput[0].cols * batchInput[0].rows;
+
     if (swapRB)
     {
         for (size_t img = 0; img < batchInput.size(); ++img)

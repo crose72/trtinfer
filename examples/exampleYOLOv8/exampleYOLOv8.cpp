@@ -3,11 +3,11 @@
 int main(void)
 {
     YOLOv8::Config config;
-    YOLOv8 yolo("/workspace/examples/exampleYOLOv8/yolov8s.engine", config);
+    YOLOv8 yolo("/workspace/trtinfer/examples/scratch/yolov8s_batch.engine", config);
     yolo.printEngineInfo();
 
     // Open the video file or camera
-    std::string video_path = "/workspace/examples/exampleYOLOv8/soccer.mp4"; // <--- YOUR VIDEO PATH
+    std::string video_path = "/workspace/trtinfer/examples/exampleYOLOv8/soccer.mp4"; // <--- YOUR VIDEO PATH
     cv::VideoCapture cap(video_path);
     if (!cap.isOpened())
     {
@@ -15,18 +15,7 @@ int main(void)
         return -1;
     }
 
-    cv::Mat frame = cv::imread("/workspace/examples/exampleBatchYOLOv8/elephant.jpg");
-
-    // Detect objects in the current frame
-    std::vector<Object> detections = yolo.detectObjects(frame);
-
-    // Draw results
-    yolo.drawObjectLabels(frame, detections);
-
-    // Show the frame
-    cv::imshow("YOLOv8 Detection", frame);
-
-    return 0;
+    cv::Mat frame;
 
     while (true)
     {

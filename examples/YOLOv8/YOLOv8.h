@@ -72,19 +72,28 @@ public:
         mStd,
         mNormalize); };
 
+private:
     // Overloaded function for single input preprocessing
     std::vector<std::vector<cv::cuda::GpuMat>> preprocess(const cv::cuda::GpuMat &gpuImg);
     // Overloaded function for batch input preprocessing
     std::vector<std::vector<cv::cuda::GpuMat>> preprocess(const std::vector<cv::cuda::GpuMat> &gpuImgs);
 
-private:
-    // Postprocess the output
+    // Overloaded function for single input object detection post processing
     std::vector<Object> postprocessDetect(std::vector<float> &featureVector);
-    std::vector<Object> postprocessDetectBatch(std::vector<float> &featureVector, int imageInBatch);
+    // Overloaded function for batch input object detection post processing
+    std::vector<Object> postprocessDetect(std::vector<float> &featureVector, int imageInBatch);
     // Postprocess the output for pose model
     std::vector<Object> postprocessPose(std::vector<float> &featureVector);
     // Postprocess the output for segmentation model
     std::vector<Object> postProcessSegmentation(std::vector<std::vector<float>> &featureVectors);
+
+    // Engine parameters
+    int64_t mEngineInputHeight;
+    int64_t mEngineInputWidth;
+    size_t mNumOutputTensors;
+    int64_t mEngineBatchSize;
+    int64_t mNumAnchorFeatures;
+    int64_t mNumAnchors;
 
     std::unique_ptr<TRTEngine<float>> mEngine;
     std::array<float, 3> mMean = {0.0f, 0.0f, 0.0f};
@@ -92,7 +101,9 @@ private:
     bool mNormalize = true; // normalize to [0,1] before mean/std
     std::string mEnginePath;
 
-    // input info
+    int mActualBatchSize;
+
+    // single input info
     float mInputImgHeight = 0.0;
     float mInputImgWidth = 0.0;
     float mAspectScaleFactor = 1.0;
@@ -101,6 +112,10 @@ private:
     std::vector<float> mInputImgHeights;
     std::vector<float> mInputImgWidths;
     std::vector<float> mAspectScaleFactors;
+
+    int mNumClasses;
+    int mNumPoseAnchorFeatures = 56;
+    int mNumDetectAnchorFeatures = 84;
 
     // detection params
     // Probability threshold used to filter detected objects
