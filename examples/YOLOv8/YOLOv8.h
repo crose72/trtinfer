@@ -28,19 +28,19 @@ public:
     struct Config
     {
         // Probability threshold used to filter detected objects
-        float probabilityThreshold = 0.25f;
+        float probabilityThreshold = (float)0.25;
         // Non-maximum suppression threshold
-        float nmsThreshold = 0.65f;
+        float nmsThreshold = (float)0.65;
         // Max number of detected objects to return
         int topK = 100;
         // Segmentation config options
         int segChannels = 32;
         int segH = 160;
         int segW = 160;
-        float segmentationThreshold = 0.5f;
+        float segmentationThreshold = (float)0.5;
         // Pose estimation options
         int numKPS = 17;
-        float kpsThreshold = 0.5f;
+        float kpsThreshold = (float)0.5;
         // Class thresholds (default are COCO classes)
         std::vector<std::string> classNames = {
             "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
@@ -57,13 +57,36 @@ public:
             "teddy bear", "hair drier", "toothbrush"};
     };
 
+    enum PostProcessType
+    {
+        YOLO_DET,
+        YOLO_SEG,
+        YOLO_POSE
+    };
+
     YOLOv8(const std::string &trtModelPath, const Config &config);
 
-    // Run inference: input is CPU or GPU Mat (single image)
     std::vector<Object> detectObjects(const cv::Mat &inputImageBGR);
     std::vector<Object> detectObjects(const cv::cuda::GpuMat &inputImageBGR);
     std::vector<std::vector<Object>> detectObjects(const std::vector<cv::Mat> &batchImgs);
     std::vector<std::vector<Object>> detectObjects(const std::vector<cv::cuda::GpuMat> &batchImgs);
+    void decodeYOLOAnchors(
+        const std::vector<float> &output,
+        int numAnchors,
+        int numClasses,
+        float detectionThreshold,
+        float aspectScaleFactor,
+        float imgWidth,
+        float imgHeight,
+        std::vector<cv::Rect> &bboxes,
+        std::vector<float> &scores,
+        std::vector<int> &labels,
+        PostProcessType type,
+        // Optional: mask coeffs and keypoints containers (pass nullptr if unused)
+        std::vector<cv::Mat> *maskConfs = nullptr,
+        std::vector<std::vector<float>> *kpss = nullptr,
+        int numMaskChannels = 0,
+        int numKeypoints = 0);
     void drawObjectLabels(cv::Mat &image, const std::vector<Object> &objects, unsigned int scale = 2);
     void printEngineInfo(void) { mEngine->printEngineInfo(); };
     void init(void) { mEngine->loadNetwork(
@@ -87,52 +110,52 @@ private:
     // Postprocess the output for segmentation model
     std::vector<Object> postProcessSegmentation(std::vector<std::vector<float>> &featureVectors);
 
-    // Engine parameters
+    // Engine input/output parameters
     int64_t mEngineInputHeight;
     int64_t mEngineInputWidth;
-    size_t mNumOutputTensors;
     int64_t mEngineBatchSize;
     int64_t mNumAnchorFeatures;
     int64_t mNumAnchors;
+    size_t mNumOutputTensors;
 
-    std::unique_ptr<TRTEngine<float>> mEngine;
-    std::array<float, 3> mMean = {0.0f, 0.0f, 0.0f};
-    std::array<float, 3> mStd = {1.0f, 1.0f, 1.0f};
-    bool mNormalize = true; // normalize to [0,1] before mean/std
+    // Engine instance
     std::string mEnginePath;
+    std::unique_ptr<TRTEngine<float>> mEngine;
 
+    // Mean and Std to subtract and divie each pixel by before
+    // passing input image to the engine
+    std::array<float, 3> mMean = {(float)0.0, (float)0.0, (float)0.0};
+    std::array<float, 3> mStd = {(float)1.0, (float)1.0, (float)1.0};
+    bool mNormalize = true; // normalize to [0,1] before mean/std
+
+    // single input image parameters
+    float mInputImgHeight = (float)0.0;
+    float mInputImgWidth = (float)0.0;
+    float mAspectScaleFactor = (float)1.0;
+
+    // batch input image parameters
     int mActualBatchSize;
-
-    // single input info
-    float mInputImgHeight = 0.0;
-    float mInputImgWidth = 0.0;
-    float mAspectScaleFactor = 1.0;
-
-    // batch input info
     std::vector<float> mInputImgHeights;
     std::vector<float> mInputImgWidths;
     std::vector<float> mAspectScaleFactors;
 
-    int mNumClasses;
-    int mNumPoseAnchorFeatures = 56;
-    int mNumDetectAnchorFeatures = 84;
+    const float mNMSThreshold = (float)0.65; // Non-maximum suppression threshold
+    const int mTopK = 100;                   // Max number of detected objects to return
+    int mNumClasses = 80;                    // default for COCO dataset
+    int mNumPoseAnchorFeatures = 56;         // default for pose estimation
+    int mNumDetectAnchorFeatures = 84;       // default for object detection
+
+    // Object classes as strings
+    const std::vector<std::string> mClassNames;
 
     // detection params
-    // Probability threshold used to filter detected objects
-    const float mDetectionThreshold = 0.25f;
-    // Non-maximum suppression threshold
-    const float mNMSThreshold = 0.65f;
-    // Max number of detected objects to return
-    const int mTopK = 100;
+    const float mDetectionThreshold = (float)0.25;
 
     // Segmentation constants
     const int mSegChannels;
     const int mSegHeight;
     const int mSegWidth;
     const float mSegThreshold;
-
-    // Object classes as strings
-    const std::vector<std::string> mClassNames;
 
     // Pose estimation constant
     const int mNumKPS;

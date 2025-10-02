@@ -501,7 +501,6 @@ std::vector<Object> YOLOv8::postProcessSegmentation(std::vector<std::vector<floa
 
         std::vector<cv::Mat> maskChannels;
         cv::split(maskMat, maskChannels);
-        const auto inputDims = mEngine->getInputDims();
 
         cv::Rect roi;
         if (mInputImgHeight > mInputImgWidth)
@@ -540,54 +539,10 @@ std::vector<Object> YOLOv8::postprocessPose(std::vector<float> &featureVector)
     std::vector<int> indices;
     std::vector<std::vector<float>> kpss;
 
-    cv::Mat output = cv::Mat(mNumAnchorFeatures, mNumAnchors, CV_32F, featureVector.data());
-    output = output.t();
-
-    // Get all the YOLO proposals
-    for (int i = 0; i < mNumAnchors; i++)
-    {
-        auto rowPtr = output.row(i).ptr<float>();
-        auto bboxesPtr = rowPtr;
-        auto scoresPtr = rowPtr + 4;
-        auto kps_ptr = rowPtr + 5;
-        float score = *scoresPtr;
-        if (score > mDetectionThreshold)
-        {
-            float x = *bboxesPtr++;
-            float y = *bboxesPtr++;
-            float w = *bboxesPtr++;
-            float h = *bboxesPtr;
-
-            float x0 = std::clamp((x - 0.5f * w) * mAspectScaleFactor, 0.f, mInputImgWidth);
-            float y0 = std::clamp((y - 0.5f * h) * mAspectScaleFactor, 0.f, mInputImgHeight);
-            float x1 = std::clamp((x + 0.5f * w) * mAspectScaleFactor, 0.f, mInputImgWidth);
-            float y1 = std::clamp((y + 0.5f * h) * mAspectScaleFactor, 0.f, mInputImgHeight);
-
-            cv::Rect_<float> bbox;
-            bbox.x = x0;
-            bbox.y = y0;
-            bbox.width = x1 - x0;
-            bbox.height = y1 - y0;
-
-            std::vector<float> kps;
-            for (int k = 0; k < mNumKPS; k++)
-            {
-                float kpsX = *(kps_ptr + 3 * k) * mAspectScaleFactor;
-                float kpsY = *(kps_ptr + 3 * k + 1) * mAspectScaleFactor;
-                float kpsS = *(kps_ptr + 3 * k + 2);
-                kpsX = std::clamp(kpsX, 0.f, mInputImgWidth);
-                kpsY = std::clamp(kpsY, 0.f, mInputImgHeight);
-                kps.push_back(kpsX);
-                kps.push_back(kpsY);
-                kps.push_back(kpsS);
-            }
-
-            bboxes.push_back(bbox);
-            labels.push_back(0); // All detected objects are people
-            scores.push_back(score);
-            kpss.push_back(kps);
-        }
-    }
+    decodeYOLOAnchors(
+        featureVector, mNumAnchors, mNumClasses, mDetectionThreshold, mAspectScaleFactor,
+        mInputImgWidth, mInputImgHeight, bboxes, scores, labels, YOLO_POSE,
+        nullptr, &kpss, 0, mNumKPS);
 
     // Run NMS
     cv::dnn::NMSBoxesBatched(bboxes, scores, labels, mDetectionThreshold, mNMSThreshold, indices);
@@ -623,47 +578,10 @@ std::vector<Object> YOLOv8::postprocessDetect(std::vector<float> &featureVector,
     std::vector<int> labels;
     std::vector<int> indices;
 
-    for (int anchor = 0; anchor < mNumAnchors; ++anchor)
-    {
-        // Fetch bbox
-        float x = featureVector[anchor + 0 * mNumAnchors];
-        float y = featureVector[anchor + 1 * mNumAnchors];
-        float w = featureVector[anchor + 2 * mNumAnchors];
-        float h = featureVector[anchor + 3 * mNumAnchors];
-
-        // Fetch class scores
-        auto class_start = 4 * mNumAnchors + anchor;
-        float max_score = -1;
-        int max_label = -1;
-        for (int cls = 0; cls < mNumClasses; ++cls)
-        {
-            float score = featureVector[class_start + cls * mNumAnchors];
-            if (score > max_score)
-            {
-                max_score = score;
-                max_label = cls;
-            }
-        }
-
-        if (max_score > mDetectionThreshold)
-        {
-            // Undo normalization/clipping as you do
-            float x0 = std::clamp((x - 0.5f * w) * mAspectScaleFactors[imageInBatch], 0.f, mInputImgWidths[imageInBatch]);
-            float y0 = std::clamp((y - 0.5f * h) * mAspectScaleFactors[imageInBatch], 0.f, mInputImgHeights[imageInBatch]);
-            float x1 = std::clamp((x + 0.5f * w) * mAspectScaleFactors[imageInBatch], 0.f, mInputImgWidths[imageInBatch]);
-            float y1 = std::clamp((y + 0.5f * h) * mAspectScaleFactors[imageInBatch], 0.f, mInputImgHeights[imageInBatch]);
-
-            cv::Rect_<float> bbox;
-            bbox.x = x0;
-            bbox.y = y0;
-            bbox.width = x1 - x0;
-            bbox.height = y1 - y0;
-
-            bboxes.push_back(bbox);
-            labels.push_back(max_label);
-            scores.push_back(max_score);
-        }
-    }
+    decodeYOLOAnchors(
+        featureVector, mNumAnchors, mNumClasses, mDetectionThreshold,
+        mAspectScaleFactors[imageInBatch], mInputImgWidths[imageInBatch], mInputImgHeights[imageInBatch],
+        bboxes, scores, labels, YOLO_DET, nullptr, nullptr, 0, 0);
 
     // NMS and rest is fine...
     cv::dnn::NMSBoxesBatched(bboxes, scores, labels, mDetectionThreshold, mNMSThreshold, indices);
@@ -696,41 +614,10 @@ std::vector<Object> YOLOv8::postprocessDetect(std::vector<float> &featureVector)
     std::vector<int> labels;
     std::vector<int> indices;
 
-    cv::Mat output = cv::Mat(mNumAnchorFeatures, mNumAnchors, CV_32F, featureVector.data());
-    output = output.t();
-
-    // Get all the YOLO proposals
-    for (int i = 0; i < mNumAnchors; i++)
-    {
-        auto rowPtr = output.row(i).ptr<float>();
-        auto bboxesPtr = rowPtr;
-        auto scoresPtr = rowPtr + 4;
-        auto maxSPtr = std::max_element(scoresPtr, scoresPtr + mNumClasses);
-        float score = *maxSPtr;
-        if (score > mDetectionThreshold)
-        {
-            float x = *bboxesPtr++;
-            float y = *bboxesPtr++;
-            float w = *bboxesPtr++;
-            float h = *bboxesPtr;
-
-            float x0 = std::clamp((x - 0.5f * w) * mAspectScaleFactor, 0.f, mInputImgWidth);
-            float y0 = std::clamp((y - 0.5f * h) * mAspectScaleFactor, 0.f, mInputImgHeight);
-            float x1 = std::clamp((x + 0.5f * w) * mAspectScaleFactor, 0.f, mInputImgWidth);
-            float y1 = std::clamp((y + 0.5f * h) * mAspectScaleFactor, 0.f, mInputImgHeight);
-
-            int label = maxSPtr - scoresPtr;
-            cv::Rect_<float> bbox;
-            bbox.x = x0;
-            bbox.y = y0;
-            bbox.width = x1 - x0;
-            bbox.height = y1 - y0;
-
-            bboxes.push_back(bbox);
-            labels.push_back(label);
-            scores.push_back(score);
-        }
-    }
+    decodeYOLOAnchors(
+        featureVector, mNumAnchors, mNumClasses, mDetectionThreshold,
+        mAspectScaleFactor, mInputImgWidth, mInputImgHeight,
+        bboxes, scores, labels, YOLO_DET, nullptr, nullptr, 0, 0);
 
     // Run NMS
     cv::dnn::NMSBoxesBatched(bboxes, scores, labels, mDetectionThreshold, mNMSThreshold, indices);
@@ -756,6 +643,130 @@ std::vector<Object> YOLOv8::postprocessDetect(std::vector<float> &featureVector)
     }
 
     return objects;
+}
+
+/**
+ * @brief Decode YOLO output tensor anchors into detection, segmentation, or pose results.
+ *
+ * This function post-processes the output tensor from a YOLO model to extract object bounding boxes,
+ * detection scores, class labels, and (optionally) segmentation masks or pose keypoints, according to the model type.
+ *
+ * @param output             Flattened output tensor (anchor-major, CHW format) from the model.
+ * @param numAnchors         Number of anchor positions (e.g., 8400 for YOLOv8).
+ * @param numClasses         Number of classes in the model (e.g., 80 for COCO).
+ * @param detectionThreshold Minimum score to accept a detection.
+ * @param aspectScaleFactor  Scale to convert normalized coordinates to image coordinates.
+ * @param imgWidth           Width of the original input image (after aspect scaling).
+ * @param imgHeight          Height of the original input image (after aspect scaling).
+ * @param[out] bboxes        Output vector of detected bounding boxes (image coordinates).
+ * @param[out] scores        Output vector of detection or instance scores.
+ * @param[out] labels        Output vector of integer class labels.
+ * @param type               Type of YOLO postprocess (YOLO_DET for detection, YOLO_SEG for segmentation, YOLO_POSE for pose).
+ * @param[in,out] maskConfs  Optional pointer to output vector for segmentation mask coefficients (YOLO_SEG only). Pass nullptr if unused.
+ * @param[in,out] kpss       Optional pointer to output vector for pose keypoints (YOLO_POSE only). Pass nullptr if unused.
+ * @param numMaskChannels    Number of mask channels (YOLO_SEG only; set to 0 otherwise).
+ * @param numKeypoints       Number of keypoints (YOLO_POSE only; set to 0 otherwise).
+ *
+ * @details
+ *  - For object detection, fills `bboxes`, `scores`, and `labels`.
+ *  - For segmentation, additionally fills `maskConfs` with per-object mask coefficients.
+ *  - For pose estimation, additionally fills `kpss` with per-object keypoints.
+ *
+ *  The output tensor should be in anchor-major, CHW layout. Segmentation and pose features are only parsed if
+ *  their respective pointers are non-null and type is set.
+ */
+
+void YOLOv8::decodeYOLOAnchors(
+    const std::vector<float> &output,
+    int numAnchors,
+    int numClasses,
+    float detectionThreshold,
+    float aspectScaleFactor,
+    float imgWidth,
+    float imgHeight,
+    std::vector<cv::Rect> &bboxes,
+    std::vector<float> &scores,
+    std::vector<int> &labels,
+    PostProcessType type,
+    // Optional: mask coeffs and keypoints containers (pass nullptr if unused)
+    std::vector<cv::Mat> *maskConfs,
+    std::vector<std::vector<float>> *kpss,
+    int numMaskChannels,
+    int numKeypoints)
+{
+    for (int anchor = 0; anchor < numAnchors; ++anchor)
+    {
+        // Fetch bbox from anchor-major layout
+        float x = output[anchor + 0 * numAnchors];
+        float y = output[anchor + 1 * numAnchors];
+        float w = output[anchor + 2 * numAnchors];
+        float h = output[anchor + 3 * numAnchors];
+
+        // Fetch class scores and get label/score
+        int class_start = 4 * numAnchors + anchor;
+        float max_score = -1.f;
+        int max_label = -1;
+
+        // Detection/Segmentation: multi-class, find max
+        if (type == YOLO_DET || type == YOLO_SEG)
+        {
+            for (int cls = 0; cls < numClasses; ++cls)
+            {
+                float s = output[class_start + cls * numAnchors];
+                if (s > max_score)
+                {
+                    max_score = s;
+                    max_label = cls;
+                }
+            }
+        }
+        // Pose: typically one score (objectness)
+        else if (type == YOLO_POSE)
+        {
+            max_score = output[class_start];
+            max_label = 0; // only "person" class
+        }
+
+        if (max_score > detectionThreshold)
+        {
+            // Convert to absolute image coordinates
+            float x0 = std::clamp((x - 0.5f * w) * aspectScaleFactor, 0.f, imgWidth);
+            float y0 = std::clamp((y - 0.5f * h) * aspectScaleFactor, 0.f, imgHeight);
+            float x1 = std::clamp((x + 0.5f * w) * aspectScaleFactor, 0.f, imgWidth);
+            float y1 = std::clamp((y + 0.5f * h) * aspectScaleFactor, 0.f, imgHeight);
+
+            bboxes.emplace_back(x0, y0, x1 - x0, y1 - y0);
+            scores.push_back(max_score);
+            labels.push_back(max_label);
+
+            // --- Segmentation mask coefficients ---
+            if (type == YOLO_SEG && maskConfs && numMaskChannels > 0)
+            {
+                int mask_start = (4 + numClasses) * numAnchors + anchor;
+                maskConfs->emplace_back(1, numMaskChannels, CV_32F,
+                                        (void *)&output[mask_start]);
+            }
+
+            // --- Keypoints for pose ---
+            if (type == YOLO_POSE && kpss && numKeypoints > 0)
+            {
+                int kps_start = (4 + 1) * numAnchors + anchor; // 4 bbox + 1 obj score
+                std::vector<float> kps;
+                for (int k = 0; k < numKeypoints; ++k)
+                {
+                    float kpsX = output[kps_start + (3 * k + 0) * numAnchors] * aspectScaleFactor;
+                    float kpsY = output[kps_start + (3 * k + 1) * numAnchors] * aspectScaleFactor;
+                    float kpsS = output[kps_start + (3 * k + 2) * numAnchors];
+                    kpsX = std::clamp(kpsX, 0.f, imgWidth);
+                    kpsY = std::clamp(kpsY, 0.f, imgHeight);
+                    kps.push_back(kpsX);
+                    kps.push_back(kpsY);
+                    kps.push_back(kpsS);
+                }
+                kpss->push_back(kps);
+            }
+        }
+    }
 }
 
 /**
