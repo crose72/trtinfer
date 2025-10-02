@@ -57,7 +57,7 @@ public:
             "teddy bear", "hair drier", "toothbrush"};
     };
 
-    enum PostProcessType
+    enum InferenceType
     {
         YOLO_DET,
         YOLO_SEG,
@@ -70,6 +70,26 @@ public:
     std::vector<Object> detectObjects(const cv::cuda::GpuMat &inputImageBGR);
     std::vector<std::vector<Object>> detectObjects(const std::vector<cv::Mat> &batchImgs);
     std::vector<std::vector<Object>> detectObjects(const std::vector<cv::cuda::GpuMat> &batchImgs);
+    void drawObjectLabels(cv::Mat &image, const std::vector<Object> &objects, unsigned int scale = 2);
+    void printEngineInfo(void) { mEngine->printEngineInfo(); };
+
+private:
+    // Overloaded function for single input preprocessing
+    std::vector<std::vector<cv::cuda::GpuMat>> preprocess(const cv::cuda::GpuMat &gpuImg);
+
+    // Overloaded function for batch input preprocessing
+    std::vector<std::vector<cv::cuda::GpuMat>> preprocess(const std::vector<cv::cuda::GpuMat> &gpuImgs);
+
+    // Batch input object detection post processing
+    std::vector<Object> postprocessDetect(std::vector<float> &featureVector, int imageInBatch);
+
+    // Postprocess the output for pose model
+    std::vector<Object> postprocessPose(std::vector<float> &featureVector);
+
+    // Postprocess the output for segmentation model
+    std::vector<Object> postProcessSegmentation(std::vector<std::vector<float>> &featureVectors);
+
+    // Common post-processing for each inference type with optional pose and segmentation outputs
     void decodeYOLOAnchors(
         const std::vector<float> &output,
         int numAnchors,
@@ -81,34 +101,12 @@ public:
         std::vector<cv::Rect> &bboxes,
         std::vector<float> &scores,
         std::vector<int> &labels,
-        PostProcessType type,
+        InferenceType type,
         // Optional: mask coeffs and keypoints containers (pass nullptr if unused)
         std::vector<cv::Mat> *maskConfs = nullptr,
         std::vector<std::vector<float>> *kpss = nullptr,
         int numMaskChannels = 0,
         int numKeypoints = 0);
-    void drawObjectLabels(cv::Mat &image, const std::vector<Object> &objects, unsigned int scale = 2);
-    void printEngineInfo(void) { mEngine->printEngineInfo(); };
-    void init(void) { mEngine->loadNetwork(
-        mEnginePath,
-        mMean,
-        mStd,
-        mNormalize); };
-
-private:
-    // Overloaded function for single input preprocessing
-    std::vector<std::vector<cv::cuda::GpuMat>> preprocess(const cv::cuda::GpuMat &gpuImg);
-    // Overloaded function for batch input preprocessing
-    std::vector<std::vector<cv::cuda::GpuMat>> preprocess(const std::vector<cv::cuda::GpuMat> &gpuImgs);
-
-    // Overloaded function for single input object detection post processing
-    std::vector<Object> postprocessDetect(std::vector<float> &featureVector);
-    // Overloaded function for batch input object detection post processing
-    std::vector<Object> postprocessDetect(std::vector<float> &featureVector, int imageInBatch);
-    // Postprocess the output for pose model
-    std::vector<Object> postprocessPose(std::vector<float> &featureVector);
-    // Postprocess the output for segmentation model
-    std::vector<Object> postProcessSegmentation(std::vector<std::vector<float>> &featureVectors);
 
     // Engine input/output parameters
     int64_t mEngineInputHeight;

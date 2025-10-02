@@ -83,42 +83,15 @@ YOLOv8::YOLOv8(const std::string &trtModelPath, const Config &config)
 }
 
 /**
- * @brief Preprocesses a CUDA BGR image for YOLOv8 inference.
+ * @brief Preprocesses a CUDA BGR image for YOLOv8 inference as a batch of 1.
  * @param gpuImg Input CUDA image (BGR).
- * @return Single
+ * @return Nested vector of resized single image with RGB format and padding
  */
 std::vector<std::vector<cv::cuda::GpuMat>> YOLOv8::preprocess(const cv::cuda::GpuMat &gpuImg)
 {
-    // Convert the image from BGR to RGB
-    // This assumes that the image is being read as the OpenCV standard BGR format
-    cv::cuda::GpuMat rgbMat;
-    cv::cuda::cvtColor(gpuImg, rgbMat, cv::COLOR_BGR2RGB);
+    std::vector<cv::cuda::GpuMat> inputImg{gpuImg};
 
-    // Initialize the resized image
-    cv::cuda::GpuMat resizedImg = rgbMat;
-
-    // Save the size of the image
-    // These params will be used in the post-processing stage
-    mInputImgHeight = rgbMat.rows;
-    mInputImgWidth = rgbMat.cols;
-
-    // How much the image is scaled up/down to required YOLO size
-    mAspectScaleFactor = (float)1.0 / std::min(mEngineInputWidth / static_cast<float>(mInputImgWidth),
-                                               mEngineInputHeight / static_cast<float>(mInputImgHeight));
-
-    // Resize to the model expected input size while maintaining the
-    // aspect ratio with the use of padding
-    if (mInputImgHeight != mEngineInputHeight || mInputImgWidth != mEngineInputWidth)
-    {
-        // Only resize if not already the right size to avoid unecessary copy
-        resizedImg = letterbox(rgbMat, mEngineInputHeight, mEngineInputWidth);
-    }
-
-    // Convert to format expected by the tensorrt inference engine
-    // The reason for the strange format is because it supports models with multiple inputs as well as batching
-    // In our case though, the model only has a single input and we are using a batch size of 1.
-    std::vector<cv::cuda::GpuMat> preprocessedImg{std::move(resizedImg)};
-    std::vector<std::vector<cv::cuda::GpuMat>> preprocessedBatch{std::move(preprocessedImg)};
+    std::vector<std::vector<cv::cuda::GpuMat>> preprocessedBatch = preprocess(inputImg);
 
     return preprocessedBatch;
 }
@@ -179,98 +152,59 @@ std::vector<std::vector<cv::cuda::GpuMat>> YOLOv8::preprocess(const std::vector<
 }
 
 /**
- * @brief Run YOLOv8 inference and return detected objects (CUDA input).
- * @param inputImgBGR Input CUDA image (BGR).
- * @return Vector of detected objects.
+ * @brief Run YOLOv8 inference and return detected objects (CPU input).
+ * @param inputImgBGR Input OpenCV image (BGR, CPU memory).
+ * @return Vector of detected objects for single image.
  */
-std::vector<Object> YOLOv8::detectObjects(const cv::cuda::GpuMat &inputImgBGR)
+std::vector<Object> YOLOv8::detectObjects(const cv::Mat &inputImgBGR)
 {
-    // Start timer to clock preprocessing time
-#ifdef ENABLE_BENCHMARKS
-    static int numIts = 1;
-    preciseStopwatch s1;
-#endif
+    // Upload the image to GPU memory
+    std::vector<cv::cuda::GpuMat> gpuImgs;
+    cv::cuda::GpuMat gpuImg;
 
-    // Preprocess the input image
-    const std::vector<std::vector<cv::cuda::GpuMat>> engineInputBatch = preprocess(inputImgBGR);
+    gpuImg.upload(inputImgBGR);
+    gpuImgs.push_back(gpuImg);
 
-    // End timer to clock preprocessing time
-#ifdef ENABLE_BENCHMARKS
-    static long long t1 = 0;
-    t1 += s1.elapsedTime<long long, std::chrono::microseconds>();
-    spdlog::info("Avg Preprocess time: {:.3f} ms", (t1 / numIts) / 1000.f);
-#endif
+    std::vector<std::vector<Object>> detections = detectObjects(gpuImgs);
+    return detections[0];
+}
 
-    // Start timer to clock inference time
-#ifdef ENABLE_BENCHMARKS
-    preciseStopwatch s2;
-#endif
+/**
+ * @brief Run YOLOv8 inference and return detected objects (CPU input).
+ * @param batchInputImgsBGR Input OpenCV images (BGR, CPU memory).
+ * @return Vector of detected objects for a batch of images.
+ */
+std::vector<Object> YOLOv8::detectObjects(const cv::cuda::GpuMat &inputImageBGR)
+{
+    std::vector<cv::cuda::GpuMat> gpuImgs;
 
-    // Run inference using the TensorRT engine
-    // Raw engine outputs
-    std::vector<std::vector<std::vector<float>>> featureVectors;
+    gpuImgs.push_back(inputImageBGR);
 
-    bool inferenceSuccessful = mEngine->runInference(engineInputBatch, featureVectors);
+    std::vector<std::vector<Object>> detections = detectObjects(gpuImgs);
 
-    if (!inferenceSuccessful)
+    return detections[0];
+}
+
+/**
+ * @brief Run YOLOv8 inference and return detected objects (CPU input).
+ * @param batchInputImgsBGR Input OpenCV images (BGR, CPU memory).
+ * @return Vector of detected objects for a batch of images.
+ */
+std::vector<std::vector<Object>> YOLOv8::detectObjects(const std::vector<cv::Mat> &batchInputImgsBGR)
+{
+    // Upload the image to GPU memory
+    std::vector<cv::cuda::GpuMat> gpuImgs;
+
+    for (const auto &cpuImg : batchInputImgsBGR)
     {
-        const std::string msg = "Error: Unable to run inference.";
-        spdlog::error(msg);
+        cv::cuda::GpuMat gpuImg;
+        gpuImg.upload(cpuImg);
+
+        gpuImgs.push_back(gpuImg);
     }
 
-    // End timer to clock inference time
-#ifdef ENABLE_BENCHMARKS
-    static long long t2 = 0;
-    t2 += s2.elapsedTime<long long, std::chrono::microseconds>();
-    spdlog::info("Avg Inference time: {:.3f} ms", (t2 / numIts) / 1000.f);
-
-    // Start timer to clock postprocessing time
-    preciseStopwatch s3;
-#endif
-
-    // Check if our model does only object detection or also supports segmentation
-    std::vector<Object> detections;
-
-    if (mNumOutputTensors == 1)
-    {
-        // Object detection or pose estimation
-        // Since we have a batch size of 1 and only 1 output,
-        // we must convert the output from a 3D array to a 1D array.
-        // TODO: change single image pre/post processing and inference
-        // to not use nested vector
-        std::vector<float> featureVector;
-        transformOutput(featureVectors, featureVector);
-
-        // TODO: Need to improve this to make it more generic (don't use magic number).
-        // For now it works with Ultralytics pretrained models.
-        if (mNumAnchorFeatures == mNumPoseAnchorFeatures)
-        {
-            // Pose estimation
-            detections = postprocessPose(featureVector);
-        }
-        else
-        {
-            // Object detection
-            detections = postprocessDetect(featureVector);
-        }
-    }
-    else
-    {
-        // Segmentation
-        // Since we have a batch size of 1 and 2 outputs, we must convert the output from a 3D array to a 2D array.
-        std::vector<std::vector<float>> featureVector;
-        transformOutput(featureVectors, featureVector);
-        detections = postProcessSegmentation(featureVector);
-    }
-
-    // End timer to clock postprocessing time
-#ifdef ENABLE_BENCHMARKS
-    static long long t3 = 0;
-    t3 += s3.elapsedTime<long long, std::chrono::microseconds>();
-    spdlog::info("Avg Postprocess time: {:.3f} ms", (t3 / numIts++) / 1000.f);
-#endif
-
-    return detections;
+    // Call detectObjects with the batch of GPU images
+    return detectObjects(gpuImgs);
 }
 
 std::vector<std::vector<Object>> YOLOv8::detectObjects(const std::vector<cv::cuda::GpuMat> &batchInputImgsBGR)
@@ -360,43 +294,6 @@ std::vector<std::vector<Object>> YOLOv8::detectObjects(const std::vector<cv::cud
 #endif
 
     return detections;
-}
-
-/**
- * @brief Run YOLOv8 inference and return detected objects (CPU input).
- * @param inputImgBGR Input OpenCV image (BGR, CPU memory).
- * @return Vector of detected objects for single image.
- */
-std::vector<Object> YOLOv8::detectObjects(const cv::Mat &inputImgBGR)
-{
-    // Upload the image to GPU memory
-    cv::cuda::GpuMat gpuImg;
-    gpuImg.upload(inputImgBGR);
-
-    // Call detectObjects with the GPU image
-    return detectObjects(gpuImg);
-}
-
-/**
- * @brief Run YOLOv8 inference and return detected objects (CPU input).
- * @param batchInputImgsBGR Input OpenCV images (BGR, CPU memory).
- * @return Vector of detected objects for a batch of images.
- */
-std::vector<std::vector<Object>> YOLOv8::detectObjects(const std::vector<cv::Mat> &batchInputImgsBGR)
-{
-    // Upload the image to GPU memory
-    std::vector<cv::cuda::GpuMat> gpuImgs;
-
-    for (const auto &cpuImg : batchInputImgsBGR)
-    {
-        cv::cuda::GpuMat gpuImg;
-        gpuImg.upload(cpuImg);
-
-        gpuImgs.push_back(gpuImg);
-    }
-
-    // Call detectObjects with the batch of GPU images
-    return detectObjects(gpuImgs);
 }
 
 /**
@@ -571,6 +468,11 @@ std::vector<Object> YOLOv8::postprocessPose(std::vector<float> &featureVector)
     return objects;
 }
 
+/**
+ * @brief Post-process detection output tensors into object vector.
+ * @param featureVector Model output tensor.
+ * @return Vector of detected objects with bounding boxes.
+ */
 std::vector<Object> YOLOv8::postprocessDetect(std::vector<float> &featureVector, int imageInBatch)
 {
     std::vector<cv::Rect> bboxes;
@@ -596,49 +498,6 @@ std::vector<Object> YOLOv8::postprocessDetect(std::vector<float> &featureVector,
         obj.label = labels[chosenIdx];
         obj.rect = bboxes[chosenIdx];
         objects.push_back(obj);
-        cnt += 1;
-    }
-
-    return objects;
-}
-
-/**
- * @brief Post-process detection output tensors into object vector.
- * @param featureVector Model output tensor.
- * @return Vector of detected objects with bounding boxes.
- */
-std::vector<Object> YOLOv8::postprocessDetect(std::vector<float> &featureVector)
-{
-    std::vector<cv::Rect> bboxes;
-    std::vector<float> scores;
-    std::vector<int> labels;
-    std::vector<int> indices;
-
-    decodeYOLOAnchors(
-        featureVector, mNumAnchors, mNumClasses, mDetectionThreshold,
-        mAspectScaleFactor, mInputImgWidth, mInputImgHeight,
-        bboxes, scores, labels, YOLO_DET, nullptr, nullptr, 0, 0);
-
-    // Run NMS
-    cv::dnn::NMSBoxesBatched(bboxes, scores, labels, mDetectionThreshold, mNMSThreshold, indices);
-
-    std::vector<Object> objects;
-
-    // Choose the top k detections
-    int cnt = 0;
-    for (auto &chosenIdx : indices)
-    {
-        if (cnt >= mTopK)
-        {
-            break;
-        }
-
-        Object obj{};
-        obj.probability = scores[chosenIdx];
-        obj.label = labels[chosenIdx];
-        obj.rect = bboxes[chosenIdx];
-        objects.push_back(obj);
-
         cnt += 1;
     }
 
@@ -687,7 +546,7 @@ void YOLOv8::decodeYOLOAnchors(
     std::vector<cv::Rect> &bboxes,
     std::vector<float> &scores,
     std::vector<int> &labels,
-    PostProcessType type,
+    InferenceType type,
     // Optional: mask coeffs and keypoints containers (pass nullptr if unused)
     std::vector<cv::Mat> *maskConfs,
     std::vector<std::vector<float>> *kpss,
