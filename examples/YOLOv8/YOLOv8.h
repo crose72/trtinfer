@@ -84,10 +84,10 @@ private:
     std::vector<Object> postprocessDetect(std::vector<float> &featureVector, int imageInBatch);
 
     // Postprocess the output for pose model
-    std::vector<Object> postprocessPose(std::vector<float> &featureVector);
+    std::vector<Object> postprocessPose(std::vector<float> &featureVector, int imageInBatch);
 
     // Postprocess the output for segmentation model
-    std::vector<Object> postProcessSegmentation(std::vector<std::vector<float>> &featureVectors);
+    std::vector<Object> postProcessSegmentation(std::vector<std::vector<float>> &featureVectors, int imageInBatch);
 
     // Common post-processing for each inference type with optional pose and segmentation outputs
     void decodeYOLOAnchors(
@@ -126,12 +126,7 @@ private:
     std::array<float, 3> mStd = {(float)1.0, (float)1.0, (float)1.0};
     bool mNormalize = true; // normalize to [0,1] before mean/std
 
-    // single input image parameters
-    float mInputImgHeight = (float)0.0;
-    float mInputImgWidth = (float)0.0;
-    float mAspectScaleFactor = (float)1.0;
-
-    // batch input image parameters
+    // Input image parameters
     int mActualBatchSize;
     std::vector<float> mInputImgHeights;
     std::vector<float> mInputImgWidths;

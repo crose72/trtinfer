@@ -6,7 +6,7 @@
 
 /**
  * @brief YOLOv8 constructor. Loads a TensorRT engine and parameters
- *        from a model path and config.
+ *        from an engine path and config.
  * @param trtModelPath Path to TensorRT engine file.
  * @param config YOLOv8 configuration parameters.
  */
@@ -152,9 +152,9 @@ std::vector<std::vector<cv::cuda::GpuMat>> YOLOv8::preprocess(const std::vector<
 }
 
 /**
- * @brief Run YOLOv8 inference and return detected objects (CPU input).
+ * @brief Run YOLOv8 inference and return detected objects for a single image (CPU input).
  * @param inputImgBGR Input OpenCV image (BGR, CPU memory).
- * @return Vector of detected objects for single image.
+ * @return Vector of detections for a single image.
  */
 std::vector<Object> YOLOv8::detectObjects(const cv::Mat &inputImgBGR)
 {
@@ -170,9 +170,9 @@ std::vector<Object> YOLOv8::detectObjects(const cv::Mat &inputImgBGR)
 }
 
 /**
- * @brief Run YOLOv8 inference and return detected objects (CPU input).
+ * @brief Run YOLOv8 inference and return detected objects for a single image (GPU input).
  * @param batchInputImgsBGR Input OpenCV images (BGR, CPU memory).
- * @return Vector of detected objects for a batch of images.
+ * @return Vector of detections for a single image.
  */
 std::vector<Object> YOLOv8::detectObjects(const cv::cuda::GpuMat &inputImageBGR)
 {
@@ -186,9 +186,9 @@ std::vector<Object> YOLOv8::detectObjects(const cv::cuda::GpuMat &inputImageBGR)
 }
 
 /**
- * @brief Run YOLOv8 inference and return detected objects (CPU input).
+ * @brief Run YOLOv8 inference and return detected objects for a batch of images (CPU input).
  * @param batchInputImgsBGR Input OpenCV images (BGR, CPU memory).
- * @return Vector of detected objects for a batch of images.
+ * @return Vector of detections for a batch of images.
  */
 std::vector<std::vector<Object>> YOLOv8::detectObjects(const std::vector<cv::Mat> &batchInputImgsBGR)
 {
@@ -207,6 +207,11 @@ std::vector<std::vector<Object>> YOLOv8::detectObjects(const std::vector<cv::Mat
     return detectObjects(gpuImgs);
 }
 
+/**
+ * @brief Run YOLOv8 inference and return detected objects for a batch of images (CPU input).
+ * @param batchInputImgsBGR Input OpenCV images (BGR, CPU memory).
+ * @return Vector of detections for a batch of images.
+ */
 std::vector<std::vector<Object>> YOLOv8::detectObjects(const std::vector<cv::cuda::GpuMat> &batchInputImgsBGR)
 {
     // Preprocess the input image
@@ -257,15 +262,19 @@ std::vector<std::vector<Object>> YOLOv8::detectObjects(const std::vector<cv::cud
     if (mNumOutputTensors == 1)
     {
         // Object detection or pose estimation
-        // Since we have a batch size of 1 and only 1 output, we must convert the output from a 3D array to a 1D array.
+        // Since we have only 1 output from the model,
+        // we must convert the output from a 3D array to a 1D array.
         std::vector<std::vector<float>> featureVector;
+
         transformOutput(featureVectors, featureVector);
 
         if (mNumAnchorFeatures == mNumPoseAnchorFeatures)
         {
-            // TODO: add support batch of images
             // Pose estimation
-            // detections = postprocessPose(featureVector);
+            for (int i = 0; i < mActualBatchSize; ++i)
+            {
+                detections.push_back(postprocessPose(featureVector[i], i));
+            }
         }
         else
         {
@@ -281,9 +290,13 @@ std::vector<std::vector<Object>> YOLOv8::detectObjects(const std::vector<cv::cud
         // TODO: add support batch of images
         // Segmentation
         // Since we have a batch size of 1 and 2 outputs, we must convert the output from a 3D array to a 2D array.
-        // std::vector<std::vector<float>> featureVector;
-        // transformOutput(featureVectors, featureVector);
-        // detections = postProcessSegmentation(featureVector);
+        std::vector<std::vector<float>> featureVector;
+        transformOutput(featureVectors, featureVector);
+
+        for (int i = 0; i < mActualBatchSize; ++i)
+        {
+            detections.push_back(postProcessSegmentation(featureVector, i));
+        }
     }
 
     // End timer to clock postprocessing time
@@ -301,7 +314,7 @@ std::vector<std::vector<Object>> YOLOv8::detectObjects(const std::vector<cv::cud
  * @param featureVectors Model output tensors (segmentation).
  * @return Vector of detected objects with segmentation masks.
  */
-std::vector<Object> YOLOv8::postProcessSegmentation(std::vector<std::vector<float>> &featureVectors)
+std::vector<Object> YOLOv8::postProcessSegmentation(std::vector<std::vector<float>> &featureVectors, int imageInBatch)
 {
     const int numAnchorPoseFeatures = (int)mNumAnchorFeatures - mSegChannels - 4;
 
@@ -319,53 +332,16 @@ std::vector<Object> YOLOv8::postProcessSegmentation(std::vector<std::vector<floa
         spdlog::error(msg);
     }
 
-    cv::Mat output = cv::Mat(mNumAnchorFeatures, mNumAnchors, CV_32F, featureVectors[0].data());
-    output = output.t();
-
-    cv::Mat protos = cv::Mat(mSegChannels, mSegHeight * mSegWidth, CV_32F, featureVectors[1].data());
-
     std::vector<int> labels;
     std::vector<float> scores;
     std::vector<cv::Rect> bboxes;
     std::vector<cv::Mat> maskConfs;
     std::vector<int> indices;
 
-    // Object the bounding boxes and class labels
-    for (int i = 0; i < mNumAnchors; i++)
-    {
-        auto rowPtr = output.row(i).ptr<float>();
-        auto bboxesPtr = rowPtr;
-        auto scoresPtr = rowPtr + 4;
-        auto maskConfsPtr = rowPtr + 4 + numAnchorPoseFeatures;
-        auto maxSPtr = std::max_element(scoresPtr, scoresPtr + numAnchorPoseFeatures);
-        float score = *maxSPtr;
-        if (score > mDetectionThreshold)
-        {
-            float x = *bboxesPtr++;
-            float y = *bboxesPtr++;
-            float w = *bboxesPtr++;
-            float h = *bboxesPtr;
-
-            float x0 = std::clamp((x - 0.5f * w) * mAspectScaleFactor, 0.f, mInputImgWidth);
-            float y0 = std::clamp((y - 0.5f * h) * mAspectScaleFactor, 0.f, mInputImgHeight);
-            float x1 = std::clamp((x + 0.5f * w) * mAspectScaleFactor, 0.f, mInputImgWidth);
-            float y1 = std::clamp((y + 0.5f * h) * mAspectScaleFactor, 0.f, mInputImgHeight);
-
-            int label = maxSPtr - scoresPtr;
-            cv::Rect_<float> bbox;
-            bbox.x = x0;
-            bbox.y = y0;
-            bbox.width = x1 - x0;
-            bbox.height = y1 - y0;
-
-            cv::Mat maskConf = cv::Mat(1, mSegChannels, CV_32F, maskConfsPtr);
-
-            bboxes.push_back(bbox);
-            labels.push_back(label);
-            scores.push_back(score);
-            maskConfs.push_back(maskConf);
-        }
-    }
+    decodeYOLOAnchors(
+        featureVectors[0], mNumAnchors, mNumClasses, mDetectionThreshold,
+        mAspectScaleFactors[imageInBatch], mInputImgWidths[imageInBatch], mInputImgHeights[imageInBatch],
+        bboxes, scores, labels, YOLO_SEG, &maskConfs, nullptr, mSegChannels, 0);
 
     // Require OpenCV 4.7 for this function
     cv::dnn::NMSBoxesBatched(bboxes, scores, labels, mDetectionThreshold, mNMSThreshold, indices);
@@ -374,6 +350,7 @@ std::vector<Object> YOLOv8::postProcessSegmentation(std::vector<std::vector<floa
     cv::Mat masks;
     std::vector<Object> objs;
     int cnt = 0;
+
     for (auto &i : indices)
     {
         if (cnt >= mTopK)
@@ -393,6 +370,8 @@ std::vector<Object> YOLOv8::postProcessSegmentation(std::vector<std::vector<floa
     // Convert segmentation mask to original frame
     if (!masks.empty())
     {
+        const cv::Mat protos = cv::Mat(mSegChannels, mSegHeight * mSegWidth, CV_32F, featureVectors[1].data());
+
         cv::Mat matmulRes = (masks * protos).t();
         cv::Mat maskMat = matmulRes.reshape(indices.size(), {mSegWidth, mSegHeight});
 
@@ -400,13 +379,13 @@ std::vector<Object> YOLOv8::postProcessSegmentation(std::vector<std::vector<floa
         cv::split(maskMat, maskChannels);
 
         cv::Rect roi;
-        if (mInputImgHeight > mInputImgWidth)
+        if (mInputImgHeights[imageInBatch] > mInputImgWidths[imageInBatch])
         {
-            roi = cv::Rect(0, 0, mSegWidth * mInputImgWidth / mInputImgHeight, mSegHeight);
+            roi = cv::Rect(0, 0, mSegWidth * mInputImgWidths[imageInBatch] / mInputImgHeights[imageInBatch], mSegHeight);
         }
         else
         {
-            roi = cv::Rect(0, 0, mSegWidth, mSegHeight * mInputImgHeight / mInputImgWidth);
+            roi = cv::Rect(0, 0, mSegWidth, mSegHeight * mInputImgHeights[imageInBatch] / mInputImgWidths[imageInBatch]);
         }
 
         for (size_t i = 0; i < indices.size(); i++)
@@ -415,7 +394,7 @@ std::vector<Object> YOLOv8::postProcessSegmentation(std::vector<std::vector<floa
             cv::exp(-maskChannels[i], dest);
             dest = 1.0 / (1.0 + dest);
             dest = dest(roi);
-            cv::resize(dest, mask, cv::Size(static_cast<int>(mInputImgWidth), static_cast<int>(mInputImgHeight)), cv::INTER_LINEAR);
+            cv::resize(dest, mask, cv::Size(static_cast<int>(mInputImgWidths[imageInBatch]), static_cast<int>(mInputImgHeights[imageInBatch])), cv::INTER_LINEAR);
             objs[i].boxMask = mask(objs[i].rect) > mSegThreshold;
         }
     }
@@ -428,7 +407,7 @@ std::vector<Object> YOLOv8::postProcessSegmentation(std::vector<std::vector<floa
  * @param featureVector Model output tensor.
  * @return Vector of detected objects with keypoints.
  */
-std::vector<Object> YOLOv8::postprocessPose(std::vector<float> &featureVector)
+std::vector<Object> YOLOv8::postprocessPose(std::vector<float> &featureVector, int imageInBatch)
 {
     std::vector<cv::Rect> bboxes;
     std::vector<float> scores;
@@ -437,9 +416,9 @@ std::vector<Object> YOLOv8::postprocessPose(std::vector<float> &featureVector)
     std::vector<std::vector<float>> kpss;
 
     decodeYOLOAnchors(
-        featureVector, mNumAnchors, mNumClasses, mDetectionThreshold, mAspectScaleFactor,
-        mInputImgWidth, mInputImgHeight, bboxes, scores, labels, YOLO_POSE,
-        nullptr, &kpss, 0, mNumKPS);
+        featureVector, mNumAnchors, mNumClasses, mDetectionThreshold,
+        mAspectScaleFactors[imageInBatch], mInputImgWidths[imageInBatch], mInputImgHeights[imageInBatch],
+        bboxes, scores, labels, YOLO_POSE, nullptr, &kpss, 0, mNumKPS);
 
     // Run NMS
     cv::dnn::NMSBoxesBatched(bboxes, scores, labels, mDetectionThreshold, mNMSThreshold, indices);
