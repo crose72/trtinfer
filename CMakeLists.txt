@@ -4,7 +4,8 @@ project(TensorRT_Inference LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(BUILD_EXAMPLES ON)
+set(CMAKE_BUILD_TYPE Release)    
+set(BUILD_EXAMPLES OFF)
 
 # Set CMAKE_MODULE_PATH if you have custom Find*.cmake files
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})

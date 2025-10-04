@@ -57,15 +57,9 @@ public:
             "teddy bear", "hair drier", "toothbrush"};
     };
 
-    enum InferenceType
-    {
-        YOLO_DET,
-        YOLO_SEG,
-        YOLO_POSE
-    };
-
     YOLOv8(const std::string &trtModelPath, const Config &config);
 
+    // API
     std::vector<Object> detectObjects(const cv::Mat &inputImageBGR);
     std::vector<Object> detectObjects(const cv::cuda::GpuMat &inputImageBGR);
     std::vector<std::vector<Object>> detectObjects(const std::vector<cv::Mat> &batchImgs);
@@ -74,6 +68,13 @@ public:
     void printEngineInfo(void) { mEngine->printEngineInfo(); };
 
 private:
+    enum InferenceType
+    {
+        YOLO_DET,
+        YOLO_SEG,
+        YOLO_POSE
+    };
+
     // Overloaded function for single input preprocessing
     std::vector<std::vector<cv::cuda::GpuMat>> preprocess(const cv::cuda::GpuMat &gpuImg);
 
@@ -92,7 +93,7 @@ private:
     // Common post-processing for each inference type with optional pose and segmentation outputs
     void decodeYOLOAnchors(
         const std::vector<float> &output,
-        const cv::Mat *outputMat,
+        const cv::Mat *outputMat, // for segmentation only
         int numAnchors,
         int numClasses,
         float detectionThreshold,
@@ -103,11 +104,16 @@ private:
         std::vector<float> &scores,
         std::vector<int> &labels,
         InferenceType type,
-        // Optional: mask coeffs and keypoints containers (pass nullptr if unused)
+        // Mask coeffs and keypoints containers for key pose
+        // estimation and segmentation (pass nullptr if unused)
         std::vector<cv::Mat> *maskConfs = nullptr,
         std::vector<std::vector<float>> *kpss = nullptr,
         int numMaskChannels = 0,
         int numKeypoints = 0);
+
+    // Engine instance
+    std::string mEnginePath;
+    std::unique_ptr<TRTEngine<float>> mEngine;
 
     // Engine input/output parameters
     int64_t mEngineInputHeight;
@@ -116,10 +122,6 @@ private:
     int64_t mNumAnchorFeatures;
     int64_t mNumAnchors;
     size_t mNumOutputTensors;
-
-    // Engine instance
-    std::string mEnginePath;
-    std::unique_ptr<TRTEngine<float>> mEngine;
 
     // Mean and Std to subtract and divie each pixel by before
     // passing input image to the engine
@@ -133,17 +135,17 @@ private:
     std::vector<float> mInputImgWidths;
     std::vector<float> mAspectScaleFactors;
 
+    // Common parameters
+    const float mDetectionThreshold;
     const float mNMSThreshold = (float)0.65; // Non-maximum suppression threshold
     const int mTopK = 100;                   // Max number of detected objects to return
     int mNumClasses = 80;                    // default for COCO dataset
-    int mNumPoseAnchorFeatures = 56;         // default for pose estimation
-    int mNumDetectAnchorFeatures = 84;       // default for object detection
 
     // Object classes as strings
     const std::vector<std::string> mClassNames;
 
     // detection params
-    const float mDetectionThreshold;
+    int mNumDetectAnchorFeatures = 84; // default for object detection
 
     // Segmentation constants
     int mSegChannels;
@@ -151,7 +153,8 @@ private:
     int mSegWidth;
     const float mSegThreshold;
 
-    // Pose estimation constant
+    // Pose estimation parameters
+    int mNumPoseAnchorFeatures = 56; // default for pose estimation
     const int mNumKPS;
     const float mKPSThresh;
 
