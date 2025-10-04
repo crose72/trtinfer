@@ -210,7 +210,6 @@ inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &
     {
         auto msg = "The feature vector has incorrect dimensions!";
         spdlog::error(msg);
-        throw std::logic_error(msg);
     }
     output = std::move(input[0][0]);
 }
@@ -224,14 +223,17 @@ inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &
                             std::vector<std::vector<float>> &output)
 {
     output.clear();
+
     for (const auto &batch_elem : input) // batch_elem is [C, N]
     {
         // Flatten [C, N] into one vector of C*N elements, channel-major order
         std::vector<float> flat;
+
         for (size_t c = 0; c < batch_elem.size(); ++c)
         {
             flat.insert(flat.end(), batch_elem[c].begin(), batch_elem[c].end());
         }
+
         output.push_back(std::move(flat));
     }
 }
@@ -245,7 +247,9 @@ inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &
 inline void transformOutput(const std::vector<std::vector<std::vector<__half>>> &input, std::vector<float> &output)
 {
     if (input.size() != 1 || input[0].size() != 1)
+    {
         throw std::logic_error("The feature vector has incorrect dimensions!");
+    }
     auto &src = input[0][0];
     output.resize(src.size());
     for (size_t i = 0; i < src.size(); ++i)

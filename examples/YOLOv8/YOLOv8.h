@@ -92,6 +92,7 @@ private:
     // Common post-processing for each inference type with optional pose and segmentation outputs
     void decodeYOLOAnchors(
         const std::vector<float> &output,
+        const cv::Mat *outputMat,
         int numAnchors,
         int numClasses,
         float detectionThreshold,
@@ -142,12 +143,12 @@ private:
     const std::vector<std::string> mClassNames;
 
     // detection params
-    const float mDetectionThreshold = (float)0.25;
+    const float mDetectionThreshold;
 
     // Segmentation constants
-    const int mSegChannels;
-    const int mSegHeight;
-    const int mSegWidth;
+    int mSegChannels;
+    int mSegHeight;
+    int mSegWidth;
     const float mSegThreshold;
 
     // Pose estimation constant

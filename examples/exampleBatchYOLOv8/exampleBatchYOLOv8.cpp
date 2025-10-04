@@ -9,12 +9,12 @@
 int main()
 {
     YOLOv8::Config config;
-    YOLOv8 yolo("/workspace/trtinfer/examples/exampleYOLOv8/yolov8s_pose_batch_fp32.engine", config);
+    YOLOv8 yolo("/workspace/examples/exampleBatchYOLOv8/yolov8s_seg_batch_fp32.engine", config);
     yolo.printEngineInfo();
 
-    std::string video_path1 = "/workspace/trtinfer/examples/media/dancing1.mp4";
-    std::string video_path2 = "/workspace/trtinfer/examples/media/dancing2.mp4";
-    std::string video_path3 = "/workspace/trtinfer/examples/media/soccer.mp4";
+    std::string video_path1 = "/workspace/examples/media/dancing1.mp4";
+    std::string video_path2 = "/workspace/examples/media/dancing2.mp4";
+    std::string video_path3 = "/workspace/examples/media/soccer.mp4";
 
     cv::VideoCapture cap1(video_path1);
     cv::VideoCapture cap2; // open after delay
