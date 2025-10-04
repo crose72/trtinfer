@@ -4,12 +4,10 @@
 #include <vector>
 #include <string>
 
-// ... your YOLOv8 includes and using namespace ...
-
 int main()
 {
     YOLOv8::Config config;
-    YOLOv8 yolo("/workspace/examples/exampleBatchYOLOv8/yolov8s_seg_batch_fp32.engine", config);
+    YOLOv8 yolo("/workspace/examples/models/yolov8s_batch.engine", config);
     yolo.printEngineInfo();
 
     std::string video_path1 = "/workspace/examples/media/dancing1.mp4";

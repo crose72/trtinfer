@@ -127,8 +127,8 @@ private:
 
     // Members
     BuildOptions mOptions;
-    std::array<float, 3> mSubVals{};
-    std::array<float, 3> mDivVals{};
+    std::array<float, 3> mSubVals = {(float)0.0, (float)0.0, (float)0.0};
+    std::array<float, 3> mDivVals = {(float)1.0, (float)1.0, (float)1.0};
     bool mNormalize = true;
     int mDeviceIndex = 0;
     int32_t mMaxBatchSize = 1;

@@ -4,7 +4,7 @@ int main(void)
 {
     // Need to preprocess images with yolo first
     YOLOv8::Config config;
-    YOLOv8 yolo("/workspace/examples/exampleBatchYOLOv8/yolov8s_seg_batch_fp32.engine", config);
+    YOLOv8 yolo("/workspace/examples/models/yolov8s_seg_batch_fp32.engine", config);
     yolo.printEngineInfo();
 
     std::vector<cv::Mat> imgs_cpu;

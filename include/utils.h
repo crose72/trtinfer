@@ -15,44 +15,24 @@
 #include <opencv2/cudaimgproc.hpp>
 #include <opencv2/cudawarping.hpp>
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
-
-    void launch_pack_nchw_kernel(
-        const float *const *imgs, float *batch_blob,
-        int N, int C, int H, int W,
-        int threadsPerBlock);
-
-    void launch_preprocess_and_pack_nchw_kernel(
-        const float *const *imgs, float *batch_blob,
-        int N, int C, int H, int W,
-        int img_stride, // <-- Add stride as param!
-        float mean0, float mean1, float mean2,
-        float std0, float std1, float std2,
-        float norm_factor,
-        int threadsPerBlock);
-
-#ifdef __cplusplus
-}
-#endif
-
 inline void checkCudaErrorCode(cudaError_t code);
 inline std::string tensorDataTypeStr(nvinfer1::DataType dataType);
 inline std::string tensorFormatStr(nvinfer1::TensorFormat format);
 inline bool doesFileExist(const std::string &name);
 inline std::filesystem::path relativePath(const std::filesystem::path &rel);
 inline std::vector<std::string> getFilesInDirectory(const std::string &dirPath);
-inline cv::cuda::GpuMat letterbox(
-    const cv::cuda::GpuMat &input,
-    size_t height,
-    size_t width,
-    const cv::Scalar &bgcolor = cv::Scalar(0, 0, 0));
-inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output);
-inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input, std::vector<float> &output);
-inline void transformOutput(const std::vector<std::vector<std::vector<__half>>> &input, std::vector<std::vector<float>> &output);
-inline void transformOutput(const std::vector<std::vector<std::vector<__half>>> &input, std::vector<float> &output);
+inline cv::cuda::GpuMat letterbox(const cv::cuda::GpuMat &input,
+                                  size_t height,
+                                  size_t width,
+                                  const cv::Scalar &bgcolor = cv::Scalar(0, 0, 0));
+inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input,
+                            std::vector<std::vector<float>> &output);
+inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input,
+                            std::vector<float> &output);
+inline void transformOutput(const std::vector<std::vector<std::vector<__half>>> &input,
+                            std::vector<std::vector<float>> &output);
+inline void transformOutput(const std::vector<std::vector<std::vector<__half>>> &input,
+                            std::vector<float> &output);
 
 #define CHECK(condition)                                                                                                           \
     do                                                                                                                             \
