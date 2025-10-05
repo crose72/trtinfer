@@ -7,7 +7,7 @@ int main(void)
     yolo.printEngineInfo();
 
     // Open the video file or camera
-    std::string video_path = "/workspace/sampleData/dancing2.mp4"; // <--- YOUR VIDEO PATH
+    std::string video_path = "/workspace/examples/sampleData/dancing2.mp4"; // <--- YOUR VIDEO PATH
     cv::VideoCapture cap(video_path);
     if (!cap.isOpened())
     {
