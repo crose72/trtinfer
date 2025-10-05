@@ -4,15 +4,31 @@
 #include <vector>
 #include <string>
 
+cv::VideoWriter writer;
+bool writer_open = false;
+const int PANEL_W = 640;
+const int PANEL_H = 480;
+const int FPS = 30;
+
+// Demo timing (seconds)
+const float T_START_2 = 2.0; // show 2nd stream at 2s
+const float T_START_3 = 4.0; // show 3rd stream at 4s
+const float T_END = 6.0;     // hard stop at 8s total
+
+// Optional: taper off in the last 2s (3->2 at 7s, 2->1 at 8s)
+const bool TAPER_DROPOFF = true;
+const float T_DROP_3 = 7.0; // hide 3rd at 7s
+const float T_DROP_2 = 8.0; // hide 2nd at 8s (loop ends)
+
 int main()
 {
     YOLOv8::Config config;
-    YOLOv8 yolo("/workspace/examples/models/yolov8s_batch.engine", config);
+    YOLOv8 yolo("/workspace/examples/models/yolov8s_seg_batch_fp32.engine", config);
     yolo.printEngineInfo();
 
-    std::string video_path1 = "/workspace/examples/media/dancing1.mp4";
-    std::string video_path2 = "/workspace/examples/media/dancing2.mp4";
-    std::string video_path3 = "/workspace/examples/media/soccer.mp4";
+    std::string video_path1 = "/workspace/sampleData/dancing1.mp4";
+    std::string video_path2 = "/workspace/sampleData/dancing2.mp4";
+    std::string video_path3 = "/workspace/sampleData/soccer.mp4";
 
     cv::VideoCapture cap1(video_path1);
     cv::VideoCapture cap2; // open after delay
@@ -31,15 +47,21 @@ int main()
     bool end3 = false;
 
     auto start_time = std::chrono::steady_clock::now();
-    std::chrono::steady_clock::time_point vid3_start_time;
-    bool vid3_timer_started = false;
 
     cv::Mat frame1;
     cv::Mat frame2;
     cv::Mat frame3;
 
+    // One elapsed timer drives the whole demo
+    auto now = std::chrono::steady_clock::now();
+    float elapsed_seconds = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count() / 1000.0;
+
     while (true)
     {
+        // One elapsed timer drives the whole demo
+        auto now = std::chrono::steady_clock::now();
+        double elapsed_seconds = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count() / 1000.0;
+
         // Read next frame from video 1
         if (!end1)
         {
@@ -56,21 +78,17 @@ int main()
             }
         }
 
-        // Start video 2 after 2-second delay
-        if (!started2)
+        // Start video 2 at T_START_2
+        if (!started2 && elapsed_seconds >= T_START_2)
         {
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed_seconds = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count() / 1000.0;
-            if (elapsed_seconds >= 2.0)
+            cap2.open(video_path2);
+            if (!cap2.isOpened())
             {
-                cap2.open(video_path2);
-                if (!cap2.isOpened())
-                {
-                    std::cerr << "Error opening video: " << video_path2 << std::endl;
-                    break;
-                }
-                started2 = true;
+                std::cerr << "Error opening video: " << video_path2 << std::endl;
+                end2 = true;
             }
+            else
+                started2 = true;
         }
 
         // Read next frame from video 2
@@ -89,44 +107,24 @@ int main()
             }
         }
 
-        // Start video 3 after 3.5s delay, stop after 4s
-        if (!started3)
+        // Start video 3 at T_START_3
+        if (!started3 && elapsed_seconds >= T_START_3)
         {
-            auto now = std::chrono::steady_clock::now();
-            auto elapsed_seconds = std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count() / 1000.0;
-            if (elapsed_seconds >= 3.5)
+            cap3.open(video_path3);
+            if (!cap3.isOpened())
             {
-                cap3.open(video_path3);
-                if (!cap3.isOpened())
-                {
-                    std::cerr << "Error opening video: " << video_path3 << std::endl;
-                    end3 = true;
-                }
-                else
-                {
-                    started3 = true;
-                    vid3_start_time = std::chrono::steady_clock::now();
-                    vid3_timer_started = true;
-                }
+                std::cerr << "Error opening video: " << video_path3 << std::endl;
+                end3 = true;
             }
+            else
+                started3 = true;
         }
 
-        // Read next frame from video 3 and close after 4s of playback
+        // Read next frame from video 3
         if (started3 && !end3)
         {
             cap3 >> frame3;
-            bool expired = false;
-            if (vid3_timer_started)
-            {
-                auto now = std::chrono::steady_clock::now();
-                double vid3_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - vid3_start_time).count() / 1000.0;
-                if (vid3_elapsed >= 4.0)
-                {
-                    expired = true;
-                }
-            }
-
-            if (frame3.empty() || expired)
+            if (frame3.empty())
             {
                 end3 = true;
                 cv::destroyWindow("YOLOv8 Detection 3");
@@ -165,7 +163,72 @@ int main()
         for (size_t i = 0; i < frames.size(); ++i)
         {
             yolo.drawObjectLabels(frames[i], detections_batch[i]);
-            cv::imshow(window_names[i], frames[i]);
+            // cv::imshow(window_names[i], frames[i]);
+        }
+
+        // ---- Side-by-side display (no padding) + combined video (no padding) ----
+        const int DISPLAY_H = 480; // target panel height for display and video
+        const int BASE_X = 200;    // where to place the first window on screen
+        const int BASE_Y = 200;
+        const int GAP_X = 0; // pixels between windows
+
+        std::vector<cv::Mat> resized_for_concat;
+        int curX = 0; // x position for next window
+
+        for (size_t i = 0; i < frames.size(); ++i)
+        {
+            cv::Mat &f = frames[i];
+            if (f.empty())
+                continue;
+
+            // Scale by height, preserve aspect (no letterbox)
+            float scale = float(DISPLAY_H) / std::max(1, f.rows);
+            int outW = std::max(1, int(std::round(f.cols * scale)));
+            cv::Mat out;
+            cv::resize(f, out, cv::Size(outW, DISPLAY_H),
+                       0, 0, (scale < 1.0 ? cv::INTER_AREA : cv::INTER_LINEAR));
+
+            // Show in its own window and place it right next to the previous one
+            const std::string win = window_names[i]; // you already build this
+            cv::namedWindow(win, cv::WINDOW_NORMAL);
+            cv::imshow(win, out);
+            cv::resizeWindow(win, outW, DISPLAY_H);
+            cv::moveWindow(win, BASE_X + curX, BASE_Y);
+
+            // Accumulate for combined video (no black bars)
+            resized_for_concat.push_back(out);
+
+            // Advance x for next window
+            curX += outW + GAP_X;
+        }
+
+        // Build combined frame (no padding) and write it
+        cv::Mat combined;
+        if (!resized_for_concat.empty())
+        {
+            cv::hconcat(resized_for_concat, combined);
+
+            if (!writer_open)
+            {
+                int fourcc = cv::VideoWriter::fourcc('m', 'p', '4', 'v');
+                writer.open("demo_batch.mp4", fourcc, FPS, combined.size());
+                writer_open = writer.isOpened();
+            }
+            if (writer_open)
+                writer.write(combined);
+
+            // Optional: preview the combined strip in one window for OBS
+            // cv::imshow("Combined Demo", combined);
+        }
+
+        // Optionally, show the combined window for live preview/OBS
+        // cv::imshow("Combined Demo", combined);
+        // cv::waitKey(0); // waits indefinitely for any key
+
+        if (elapsed_seconds >= T_END)
+        {
+            // Write one last frame already done above; then exit cleanly
+            break;
         }
 
         char key = static_cast<char>(cv::waitKey(1));

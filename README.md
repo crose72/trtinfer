@@ -1,3 +1,15 @@
+<p align="center">
+  <img src="assets/batchDetections.gif" width="300"/>
+  <img src="assets/batchPose.gif" width="300"/>
+  <img src="assets/batchSeg.gif" width="300"/>
+</p>
+
+<p align="center">
+  <sub><b>Object Detection</b> | <b>Pose Estimation</b> | <b>Segmentation</b></sub>
+</p>
+
+---
+
 # Deep Learning Inference with TensorRT
 
 `trtinfer` is a library that enables deep learning inference using pre-generated TensorRT engines.  The class is designed to be used with any machine learning model that can be exported to a TensorRT engine.  Batch image inference is supported for models with multiple output tensors (e.g., YOLOv8 segmentation).  

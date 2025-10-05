@@ -25,6 +25,10 @@ inline cv::cuda::GpuMat letterbox(const cv::cuda::GpuMat &input,
                                   size_t height,
                                   size_t width,
                                   const cv::Scalar &bgcolor = cv::Scalar(0, 0, 0));
+inline cv::Mat letterbox(const cv::Mat &input,
+                         size_t height,
+                         size_t width,
+                         const cv::Scalar &bgcolor = cv::Scalar(0, 0, 0));
 inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input,
                             std::vector<std::vector<float>> &output);
 inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input,
@@ -147,6 +151,42 @@ inline std::string tensorFormatStr(nvinfer1::TensorFormat format)
     default:
         return "UNKNOWN";
     }
+}
+
+/**
+ * @brief Resize a cpu image to the target size while maintaining aspect ratio, padding right/bottom as needed.
+ * @param input Input cpu image.
+ * @param height Target height.
+ * @param width Target width.
+ * @param bgcolor Color used for padding (default: black).
+ * @return Resized and padded cpu image.
+ */
+inline cv::Mat letterbox(
+    const cv::Mat &input,
+    size_t height, size_t width,
+    const cv::Scalar &bgcolor)
+{
+    if (input.empty())
+        return cv::Mat(height, width, CV_8UC3, bgcolor);
+
+    // Compute resize ratio
+    float r = std::min(width / (input.cols * 1.0f),
+                       height / (input.rows * 1.0f));
+
+    int unpad_w = std::round(input.cols * r);
+    int unpad_h = std::round(input.rows * r);
+
+    // Resize the input image with aspect ratio preserved
+    cv::Mat resized;
+    cv::resize(input, resized, cv::Size(unpad_w, unpad_h));
+
+    // Create output image filled with background color
+    cv::Mat out(height, width, CV_8UC3, bgcolor);
+
+    // Copy resized image into top-left corner (same as your GPU version)
+    resized.copyTo(out(cv::Rect(0, 0, resized.cols, resized.rows)));
+
+    return out;
 }
 
 /**

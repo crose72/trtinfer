@@ -6,9 +6,9 @@ int main(int argc, char **argv)
     resnet50Classifier.init();
     std::vector<std::string> testImgsList;
 
-    testImgsList.push_back("/workspace/examples/media/elephant.jpg");
-    testImgsList.push_back("/workspace/examples/media/border-collie.jpg");
-    testImgsList.push_back("/workspace/examples/media/squirrel.jpg");
+    testImgsList.push_back("/workspace/sampleData/elephant.jpg");
+    testImgsList.push_back("/workspace/sampleData/border-collie.jpg");
+    testImgsList.push_back("/workspace/sampleData/squirrel.jpg");
 
     for (const auto testImg : testImgsList)
     {
