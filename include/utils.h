@@ -21,15 +21,22 @@ inline std::string tensorFormatStr(nvinfer1::TensorFormat format);
 inline bool doesFileExist(const std::string &name);
 inline std::filesystem::path relativePath(const std::filesystem::path &rel);
 inline std::vector<std::string> getFilesInDirectory(const std::string &dirPath);
-inline cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(
-    const cv::cuda::GpuMat &input,
-    size_t height,
-    size_t width,
-    const cv::Scalar &bgcolor = cv::Scalar(0, 0, 0));
-inline void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output);
-inline void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<float> &output);
-inline void transformOutput(std::vector<std::vector<std::vector<__half>>> &input, std::vector<std::vector<float>> &output);
-inline void transformOutput(std::vector<std::vector<std::vector<__half>>> &input, std::vector<float> &output);
+inline cv::cuda::GpuMat letterbox(const cv::cuda::GpuMat &input,
+                                  size_t height,
+                                  size_t width,
+                                  const cv::Scalar &bgcolor = cv::Scalar(0, 0, 0));
+inline cv::Mat letterbox(const cv::Mat &input,
+                         size_t height,
+                         size_t width,
+                         const cv::Scalar &bgcolor = cv::Scalar(0, 0, 0));
+inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input,
+                            std::vector<std::vector<float>> &output);
+inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input,
+                            std::vector<float> &output);
+inline void transformOutput(const std::vector<std::vector<std::vector<__half>>> &input,
+                            std::vector<std::vector<float>> &output);
+inline void transformOutput(const std::vector<std::vector<std::vector<__half>>> &input,
+                            std::vector<float> &output);
 
 #define CHECK(condition)                                                                                                           \
     do                                                                                                                             \
@@ -147,6 +154,42 @@ inline std::string tensorFormatStr(nvinfer1::TensorFormat format)
 }
 
 /**
+ * @brief Resize a cpu image to the target size while maintaining aspect ratio, padding right/bottom as needed.
+ * @param input Input cpu image.
+ * @param height Target height.
+ * @param width Target width.
+ * @param bgcolor Color used for padding (default: black).
+ * @return Resized and padded cpu image.
+ */
+inline cv::Mat letterbox(
+    const cv::Mat &input,
+    size_t height, size_t width,
+    const cv::Scalar &bgcolor)
+{
+    if (input.empty())
+        return cv::Mat(height, width, CV_8UC3, bgcolor);
+
+    // Compute resize ratio
+    float r = std::min(width / (input.cols * 1.0f),
+                       height / (input.rows * 1.0f));
+
+    int unpad_w = std::round(input.cols * r);
+    int unpad_h = std::round(input.rows * r);
+
+    // Resize the input image with aspect ratio preserved
+    cv::Mat resized;
+    cv::resize(input, resized, cv::Size(unpad_w, unpad_h));
+
+    // Create output image filled with background color
+    cv::Mat out(height, width, CV_8UC3, bgcolor);
+
+    // Copy resized image into top-left corner (same as your GPU version)
+    resized.copyTo(out(cv::Rect(0, 0, resized.cols, resized.rows)));
+
+    return out;
+}
+
+/**
  * @brief Resize a CUDA image to the target size while maintaining aspect ratio, padding right/bottom as needed.
  * @param input Input CUDA GpuMat image.
  * @param height Target height.
@@ -154,17 +197,24 @@ inline std::string tensorFormatStr(nvinfer1::TensorFormat format)
  * @param bgcolor Color used for padding (default: black).
  * @return Resized and padded CUDA image (GpuMat).
  */
-inline cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(
+inline cv::cuda::GpuMat letterbox(
     const cv::cuda::GpuMat &input,
     size_t height, size_t width,
     const cv::Scalar &bgcolor)
 {
+    // Compute resize ratio
     float r = std::min(width / (input.cols * 1.0), height / (input.rows * 1.0));
     int unpad_w = r * input.cols;
     int unpad_h = r * input.rows;
+
+    // Resize the input image with aspect ratio preserved
     cv::cuda::GpuMat re(unpad_h, unpad_w, CV_8UC3);
     cv::cuda::resize(input, re, re.size());
+
+    // Create an output image filled with bg color
     cv::cuda::GpuMat out(height, width, CV_8UC3, bgcolor);
+
+    // Copy resized image to top-left corner of output
     re.copyTo(out(cv::Rect(0, 0, re.cols, re.rows)));
     return out;
 }
@@ -173,35 +223,39 @@ inline cv::cuda::GpuMat resizeKeepAspectRatioPadRightBottom(
  * @brief Flattens a nested 3D feature vector (size 1x1xN) into a 1D output vector.
  * @param input Input feature vector (nested).
  * @param output Output vector (flattened).
- * @throws std::logic_error if input is not 1x1.
  */
-inline void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<float> &output)
+inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input, std::vector<float> &output)
 {
     if (input.size() != 1 || input[0].size() != 1)
     {
         auto msg = "The feature vector has incorrect dimensions!";
         spdlog::error(msg);
-        throw std::logic_error(msg);
     }
     output = std::move(input[0][0]);
 }
 
 /**
- * @brief Flattens a nested 3D feature vector (size 1xNxM) into a 2D output vector.
+ * @brief Flattens a nested 3D feature vector (size BxMxN) into a 1D output vector.
  * @param input Input feature vector (nested).
- * @param output Output vector (2D, flattened batch).
- * @throws std::logic_error if input batch size is not 1.
+ * @param output Output vector (flattened).
  */
-inline void transformOutput(std::vector<std::vector<std::vector<float>>> &input, std::vector<std::vector<float>> &output)
+inline void transformOutput(const std::vector<std::vector<std::vector<float>>> &input,
+                            std::vector<std::vector<float>> &output)
 {
-    if (input.size() != 1)
-    {
-        auto msg = "The feature vector has incorrect dimensions!";
-        spdlog::error(msg);
-        throw std::logic_error(msg);
-    }
+    output.clear();
 
-    output = std::move(input[0]);
+    for (const auto &batch_elem : input) // batch_elem is [C, N]
+    {
+        // Flatten [C, N] into one vector of C*N elements, channel-major order
+        std::vector<float> flat;
+
+        for (size_t c = 0; c < batch_elem.size(); ++c)
+        {
+            flat.insert(flat.end(), batch_elem[c].begin(), batch_elem[c].end());
+        }
+
+        output.push_back(std::move(flat));
+    }
 }
 
 /**
@@ -210,10 +264,12 @@ inline void transformOutput(std::vector<std::vector<std::vector<float>>> &input,
  * @param output Output vector (flattened).
  * @throws std::logic_error if input is not 1x1.
  */
-inline void transformOutput(std::vector<std::vector<std::vector<__half>>> &input, std::vector<float> &output)
+inline void transformOutput(const std::vector<std::vector<std::vector<__half>>> &input, std::vector<float> &output)
 {
     if (input.size() != 1 || input[0].size() != 1)
+    {
         throw std::logic_error("The feature vector has incorrect dimensions!");
+    }
     auto &src = input[0][0];
     output.resize(src.size());
     for (size_t i = 0; i < src.size(); ++i)
@@ -226,7 +282,7 @@ inline void transformOutput(std::vector<std::vector<std::vector<__half>>> &input
  * @param output Output vector (2D, flattened batch).
  * @throws std::logic_error if input batch size is not 1.
  */
-inline void transformOutput(std::vector<std::vector<std::vector<__half>>> &input, std::vector<std::vector<float>> &output)
+inline void transformOutput(const std::vector<std::vector<std::vector<__half>>> &input, std::vector<std::vector<float>> &output)
 {
     if (input.size() != 1)
         throw std::logic_error("The feature vector has incorrect dimensions!");

@@ -2,20 +2,19 @@
 
 int main(int argc, char **argv)
 {
-    ResNet50 resnet50Classifier("/workspace/examples/exampleResnet50/resnet50.engine");
+    ResNet50 resnet50Classifier("/workspace/examples/models/resnet50.engine");
     resnet50Classifier.init();
-    std::vector<std::string> testImages;
+    std::vector<std::string> testImgsList;
 
-    testImages.push_back("/workspace/examples/exampleResnet50/elephant.jpg");
-    testImages.push_back("/workspace/examples/exampleResnet50/border-collie.jpg");
-    testImages.push_back("/workspace/examples/exampleResnet50/squirrel.jpg");
+    testImgsList.push_back("/workspace/examples/sampleData/elephant.jpg");
+    testImgsList.push_back("/workspace/examples/sampleData/border-collie.jpg");
+    testImgsList.push_back("/workspace/examples/sampleData/squirrel.jpg");
 
-    std::vector<cv::Mat> testImagesCV;
-
-    for (const auto image : testImages)
+    for (const auto testImg : testImgsList)
     {
-        std::cout << "Image: " << image << std::endl;
-        resnet50Classifier.classify(cv::imread(image));
+        cv::Mat img = cv::imread(testImg);
+        std::cout << "Image: " << testImg << std::endl;
+        resnet50Classifier.classify(img);
     }
 
     return 0;

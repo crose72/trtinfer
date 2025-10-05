@@ -3,11 +3,11 @@
 int main(void)
 {
     YOLOv8::Config config;
-    YOLOv8 yolo("/workspace/examples/exampleYOLOv8/yolov8s.engine", config);
+    YOLOv8 yolo("/workspace/examples/models/yolov8s_batch.engine", config);
     yolo.printEngineInfo();
 
     // Open the video file or camera
-    std::string video_path = "/workspace/examples/exampleYOLOv8/soccer.mp4"; // <--- YOUR VIDEO PATH
+    std::string video_path = "/workspace/examples/sampleData/dancing2.mp4"; // <--- YOUR VIDEO PATH
     cv::VideoCapture cap(video_path);
     if (!cap.isOpened())
     {
@@ -40,7 +40,5 @@ int main(void)
 
     cap.release();
     cv::destroyAllWindows();
-    return 0;
-
     return 0;
 }

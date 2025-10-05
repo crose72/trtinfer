@@ -176,6 +176,18 @@ bool TRTEngine<T>::runInference(const std::vector<std::vector<cv::cuda::GpuMat>>
         mBuffers[i] = mfloat.ptr<void>();
     }
 
+    for (size_t i = 0; i < mInputNames.size(); ++i)
+    {
+        nvinfer1::Dims dims = mInputDims[i]; // e.g. dims.nbDims == 4 for [N,3,640,640]
+        dims.d[0] = inputs[i].size();        // set N = batch size (for input i)
+
+        bool success = mContext->setInputShape(mInputNames[i].c_str(), dims);
+        if (!success)
+        {
+            throw std::runtime_error("Failed to set input shape for " + std::string(mInputNames[i]));
+        }
+    }
+
     // Ensure all dynamic bindings have been defined.
     if (!mContext->allInputDimensionsSpecified())
     {
@@ -266,13 +278,43 @@ cv::cuda::GpuMat TRTEngine<T>::blobFromGpuMats(const std::vector<cv::cuda::GpuMa
                                                bool normalize,
                                                bool swapRB)
 {
-
+    /*
+     * ----------------------------------------
+     * Batch Image Packing for TensorRT Inference
+     * ----------------------------------------
+     *
+     * This function packs a batch of images (each as a cv::cuda::GpuMat, shape HxW, 3 channels)
+     * into a single, flat, contiguous CUDA buffer (GpuMat) suitable for TensorRT NCHW input.
+     *
+     * Memory Layout:
+     *   - The output buffer (gpu_dst) is a single row, with width = H * W * batch_size, 3 channels.
+     *   - For each image in the batch:
+     *       - The R, G, and B channel data are placed contiguously at specific offsets
+     *         (i.e., all R for image 0, all G for image 0, all B for image 0, then repeat for image 1, etc).
+     *   - Each channel of each image is "viewed" as a GpuMat at the correct offset inside the buffer,
+     *     so no extra memory allocation or copying is needed.
+     *
+     * Usage of cv::cuda::split:
+     *   - For each image, we create three GpuMat views (one per channel) at the appropriate offset in the flat buffer.
+     *   - cv::cuda::split splits an input image into R, G, and B channel planes, storing them directly into the preallocated regions.
+     *   - This results in the correct NCHW layout for inference: [R_plane][G_plane][B_plane] for each image, contiguous for the batch.
+     *
+     * Why not just interleaved?
+     *   - OpenCV stores images as interleaved (RGBRGB...), but most deep learning inference engines (like TensorRT)
+     *     expect the data in planar format: [all R][all G][all B], row-major within each channel.
+     *   - This packing function prepares exactly that format, compatible with TensorRT NCHW input.
+     *
+     * Note:
+     *   - The critical part is using GpuMat "views" (with custom data pointers) for each channel at the right offset,
+     *     so the split writes directly into the batch buffer.
+     */
     CHECK(!batchInput.empty())
     CHECK(batchInput[0].channels() == 3)
 
     cv::cuda::GpuMat gpu_dst(1, batchInput[0].rows * batchInput[0].cols * batchInput.size(), CV_8UC3);
 
     size_t width = batchInput[0].cols * batchInput[0].rows;
+
     if (swapRB)
     {
         for (size_t img = 0; img < batchInput.size(); ++img)
@@ -336,6 +378,7 @@ void TRTEngine<T>::getEngineInfo(void)
         const nvinfer1::Dims tensorShape = mEngine->getTensorShape(tensorName);
         const nvinfer1::DataType tensorDataType = mEngine->getTensorDataType(tensorName);
         mTensorTypes.push_back(tensorType);
+        int profileIndex = 0; // index for looping through optimization profiles - if engine has > 1
 
         // Tensor is an input
         if (tensorType == nvinfer1::TensorIOMode::kINPUT)
@@ -352,14 +395,17 @@ void TRTEngine<T>::getEngineInfo(void)
             // GpuMat buffer directly - could be something done in the future
 
             // Populate engine info
-            nvinfer1::Dims3 inputDims(tensorShape.d[1], tensorShape.d[2], tensorShape.d[3]);
-            mInputDims.emplace_back(inputDims);
+            mInputDims.emplace_back(tensorShape);
             mInputNames.emplace_back(tensorName);
             mInputTensorFormats.emplace_back(mEngine->getTensorFormat(tensorName));
             mInputDataTypes.emplace_back(mEngine->getTensorDataType(tensorName));
             // first dim is typically batch size.  Is -1 for dynamic batches
+            // Getting the max batch size from the optimization profile
+            // TODO: support multiple optimization profiles
+            nvinfer1::Dims maxDims;
+            maxDims = mEngine->getProfileShape(tensorName, profileIndex, nvinfer1::OptProfileSelector::kMAX);
             mInputBatchSize = tensorShape.d[0];
-            mMaxBatchSize = std::max((int32_t)tensorShape.d[0], mMaxBatchSize);
+            mMaxBatchSize = std::max((int32_t)maxDims.d[0], mMaxBatchSize);
         }
         else if (tensorType == nvinfer1::TensorIOMode::kOUTPUT)
         {
