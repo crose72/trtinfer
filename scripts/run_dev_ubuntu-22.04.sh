@@ -31,7 +31,7 @@ sudo docker run --gpus all -it --rm --network host \
   --volume /tmp/argus_socket:/tmp/argus_socket \
   --volume /usr/lib/aarch64-linux-gnu/tegra:/usr/lib/aarch64-linux-gnu/tegra \
   --volume ${PWD}/..:/workspace \
-  --name squirreldefender-dev \
+  --name trtinfer-dev \
   crose72/os-dev:cuda12.6-trt10.5-cv4.10-sm86-vpi3.2-ubuntu22 \
   bash -c "cd /workspace/ \
     && exec bash"

@@ -30,7 +30,7 @@ sudo docker run --runtime nvidia -it --rm --network host \
   --volume /tmp/argus_socket:/tmp/argus_socket \
   --volume /usr/lib/aarch64-linux-gnu/tegra:/usr/lib/aarch64-linux-gnu/tegra \
   --volume ${PWD}/..:/workspace \
-  --name squirreldefender-dev \
+  --name trtinfer-dev \
   crose72/jetpack-r36.4.0:dev \
   bash -c "cd /workspace/ \
     && exec bash"
