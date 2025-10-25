@@ -5,10 +5,26 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_BUILD_TYPE Release)    
-set(BUILD_EXAMPLES OFF)
+set(BUILD_EXAMPLES ON)
 
 # Set CMAKE_MODULE_PATH if you have custom Find*.cmake files
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
+
+# --- TensorRT configuration ---
+set(TensorRT_ROOT /opt/tensorrt CACHE PATH "Path to TensorRT installation")
+set(TensorRT_INCLUDE_DIRS ${TensorRT_ROOT}/include)
+set(TensorRT_LIBRARY_DIRS ${TensorRT_ROOT}/lib)
+
+# Tell CMake where to search for TensorRT libs
+link_directories(${TensorRT_LIBRARY_DIRS})
+
+# Optional: explicit libs if you want to list them
+set(TensorRT_LIBS
+    ${TensorRT_LIBRARY_DIRS}/libnvinfer.so
+    ${TensorRT_LIBRARY_DIRS}/libnvinfer_plugin.so
+    ${TensorRT_LIBRARY_DIRS}/libnvonnxparser.so
+    ${TensorRT_LIBRARY_DIRS}/libnvparsers.so
+)
 
 find_package(CUDA REQUIRED)
 find_package(OpenCV REQUIRED)

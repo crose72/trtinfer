@@ -1,5 +1,5 @@
 # Ensure ${OS_WS} is defined
-docker pull crose72/os-dev:cuda12.6-trt10.5-cv4.10-sm86-vpi3.2-ubuntu22
+docker pull crose72/os-dev:cuda11.8-cudnn89-trt853-ubuntu22
 sudo docker run --gpus all -it --rm --network host \
   --add-host=host.docker.internal:host-gateway \
   --privileged --ipc=host \
@@ -32,6 +32,6 @@ sudo docker run --gpus all -it --rm --network host \
   --volume /usr/lib/aarch64-linux-gnu/tegra:/usr/lib/aarch64-linux-gnu/tegra \
   --volume ${PWD}/..:/workspace \
   --name trtinfer-dev \
-  crose72/os-dev:cuda12.6-trt10.5-cv4.10-sm86-vpi3.2-ubuntu22 \
+  crose72/os-dev:cuda11.8-cudnn89-trt853-ubuntu22 \
   bash -c "cd /workspace/ \
     && exec bash"

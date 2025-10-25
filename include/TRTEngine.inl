@@ -449,12 +449,6 @@ void TRTEngine<T>::getEngineInfo(void)
                 spdlog::error(msg);
                 throw std::runtime_error(msg);
             }
-            else if (tensorDataType == nvinfer1::DataType::kFP8)
-            {
-                auto msg = "Error, the model has expected output of type kFP8. This is not supported by the Engine class.";
-                spdlog::error(msg);
-                throw std::runtime_error(msg);
-            }
 
             // Calculate the length of the output to allocate for the output
             // Output memory reserved for output buffer will be the outputLength * sizeof(dataType)

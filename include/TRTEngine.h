@@ -2,9 +2,10 @@
 
 #include <NvInfer.h>
 #include <NvOnnxParser.h>
+#include <NvInferRuntimeCommon.h>
+#include <NvInferPlugin.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
-#include <NvInferRuntimePlugin.h>
 #include <opencv2/core/cuda.hpp>
 #include <opencv2/opencv.hpp>
 #include <filesystem>
